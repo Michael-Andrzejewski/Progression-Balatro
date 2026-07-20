@@ -426,7 +426,15 @@ function PROG.reward_options()
 		table.sort(opts, function(a, b) return a.label < b.label end)
 	elseif rtype == 'deck' then
 		local st = PROG.state()
-		local excluded = { b_challenge = true, b_mp_cocktail = true, [PROG.DECK_KEY] = true }
+		-- b_cry_antimatter and b_akyrs_hardcore_challenges misbehave outside their own
+		-- context (the Cocktail deck blacklists them for the same reason)
+		local excluded = {
+			b_challenge = true,
+			b_mp_cocktail = true,
+			b_cry_antimatter = true,
+			b_akyrs_hardcore_challenges = true,
+			[PROG.DECK_KEY] = true,
+		}
 		for _, d in ipairs(st.decks) do excluded[d] = true end
 		for _, center in ipairs(G.P_CENTER_POOLS.Back or {}) do
 			if center.unlocked and not center.omit and not excluded[center.key] then
