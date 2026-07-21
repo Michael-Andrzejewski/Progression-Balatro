@@ -27,8 +27,8 @@ A roguelite meta-progression deck for [Balatro](https://www.playbalatro.com/). B
 ## How to play
 
 1. **Start a new run** and choose the **Progression Deck**. It begins as an ordinary 52-card deck with no bonuses. Stake choice is up to you (the mod's own scaling is separate from stakes).
-2. **Win the run** by beating Ante 8. A reward screen appears.
-3. **Pick one thing to keep forever.** What you're offered depends on which run number you're on (see the table below). Choose a card, Joker, Voucher, or deck effect, or Skip it.
+2. **Win the run** by beating Ante 8. The reward picker opens automatically. If you ever miss it or dismiss it, open the **Options menu** (during the run) and click **Choose Progression Reward**. It's available there until you claim.
+3. **Pick one thing to keep forever.** What you're offered depends on which run number you're on (see the table below). Choose a card, Joker, Voucher, or deck effect, or Skip it. Kept cards keep permanent bonuses too (extra chips from Hiker, etc.).
 4. **Start the next run.** Click **Start Run N** and you're dropped into a fresh run with your kept items already in place, and the blinds now scale one level faster.
 5. **Repeat.** Each win adds another permanent item and another level of blind scaling. The reward type cycles: card, then Joker, then Voucher, then deck effect, then back to a second card, and so on forever.
 
@@ -93,9 +93,9 @@ To resume on another machine, install this mod (plus any content mods your run u
 
 ## Known limitations
 
-- Claim your reward before quitting at the win screen. If you close the game with the reward menu still open, that run's reward is lost (the run level doesn't advance either, so you can just win it again).
-- Rewards are chosen from a text list rather than clickable card art in this first version.
+- Rewards are chosen from a text list rather than clickable card art in this version.
 - A few modded decks that only behave inside their own game mode (Cryptid's Antimatter, Aikoyori's Hardcore Challenges) are excluded from the deck-effect reward on purpose.
+- Kept cards restore their enhancement, edition, seal, and permanent numeric bonuses (`perma_*` fields). Very exotic modded per-card effects that store state elsewhere may not fully round-trip.
 
 ## License
 

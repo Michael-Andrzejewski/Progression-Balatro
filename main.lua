@@ -84,6 +84,18 @@ function PROG.capture_playing_card(card)
 	if center and center.key and center.key ~= 'c_base' then entry.enhancement = center.key end
 	if card.edition and card.edition.key then entry.edition = card.edition.key end
 	if card.seal then entry.seal = card.seal end
+	-- Permanent per-card bonuses: Hiker chips (perma_bonus), and any modded
+	-- perma_* or retrigger ability fields, so a juiced card comes back intact.
+	local perma = {}
+	if card.ability then
+		for k, v in pairs(card.ability) do
+			if type(k) == 'string' and type(v) == 'number' and v ~= 0
+				and (string.match(k, '^perma') or string.match(k, 'retrigger')) then
+				perma[k] = v
+			end
+		end
+	end
+	if next(perma) then entry.perma = perma end
 	return entry
 end
 
@@ -104,7 +116,41 @@ function PROG.describe_card_entry(c)
 	if c.seal then
 		parts[#parts + 1] = tostring(c.seal) .. ' Seal'
 	end
+	if c.perma then
+		if c.perma.perma_bonus then parts[#parts + 1] = '+' .. c.perma.perma_bonus .. ' chips' end
+		if c.perma.perma_mult then parts[#parts + 1] = '+' .. c.perma.perma_mult .. ' mult' end
+		local extras = 0
+		for k in pairs(c.perma) do
+			if k ~= 'perma_bonus' and k ~= 'perma_mult' then extras = extras + 1 end
+		end
+		if extras > 0 then parts[#parts + 1] = '+bonuses' end
+	end
 	return table.concat(parts, ', ')
+end
+
+-- Spawn a kept playing card straight into the deck, restoring enhancement,
+-- edition, seal, and any captured permanent bonuses. Modeled on card_from_control.
+function PROG.spawn_kept_card(entry)
+	local proto = PROG.card_proto(entry)
+	if not proto then return end
+	G.playing_card = (G.playing_card and G.playing_card + 1) or 1
+	local _card = Card(G.deck.T.x, G.deck.T.y, G.CARD_W, G.CARD_H,
+		G.P_CARDS[proto.s .. '_' .. proto.r], G.P_CENTERS[proto.e or 'c_base'],
+		{ playing_card = G.playing_card })
+	if proto.d then _card:set_edition({ [proto.d] = true }, true, true) end
+	if proto.g then _card:set_seal(proto.g, true, true) end
+	if entry.perma and _card.ability then
+		for k, v in pairs(entry.perma) do
+			if type(v) == 'number' then
+				_card.ability[k] = (_card.ability[k] or 0) + v
+			else
+				_card.ability[k] = v
+			end
+		end
+	end
+	_card:add_to_deck()
+	G.deck:emplace(_card)
+	table.insert(G.playing_cards, _card)
 end
 
 -- Convert a stored card entry into a card_from_control proto ({s, r, e, d, g}).
@@ -185,9 +231,18 @@ function PROG.import_json(str)
 	if type(data.cards) == 'table' then
 		for _, c in ipairs(data.cards) do
 			if type(c) == 'table' and c.rank and c.suit then
+				local perma = nil
+				if type(c.perma) == 'table' then
+					perma = {}
+					for k, v in pairs(c.perma) do
+						if type(k) == 'string' then perma[k] = v end
+					end
+					if not next(perma) then perma = nil end
+				end
 				st.cards[#st.cards + 1] = {
 					rank = tostring(c.rank), suit = tostring(c.suit),
 					enhancement = c.enhancement, edition = c.edition, seal = c.seal,
+					perma = perma,
 				}
 			end
 		end
@@ -289,11 +344,18 @@ local back_obj = SMODS.Back({
 		end
 		back.effect.prog_merged = true
 
-		-- Kept playing cards join the starting deck
-		G.GAME.starting_params.extra_cards = G.GAME.starting_params.extra_cards or {}
-		for _, c in ipairs(st.cards) do
-			local proto = PROG.card_proto(c)
-			if proto then table.insert(G.GAME.starting_params.extra_cards, proto) end
+		-- Kept playing cards. Spawned in a deferred event so G.deck exists and so we
+		-- can restore permanent bonuses (the extra_cards proto path can't carry those).
+		if #st.cards > 0 then
+			G.E_MANAGER:add_event(Event({
+				func = function()
+					if G.deck then
+						for _, c in ipairs(st.cards) do PROG.spawn_kept_card(c) end
+						G.GAME.starting_deck_size = #G.playing_cards
+					end
+					return true
+				end,
+			}))
 		end
 
 		-- Kept Jokers
@@ -347,9 +409,21 @@ local back_obj = SMODS.Back({
 PROG.DECK_KEY = (back_obj and back_obj.key) or 'b_prog_progression'
 
 function PROG.in_run()
-	return G.GAME and G.GAME.selected_back and G.GAME.selected_back.effect
+	if not G.GAME then return false end
+	-- Primary signal: apply() sets prog_run, and it persists in the save. Fall back
+	-- to matching the selected back's key in case apply() didn't run for some reason.
+	if G.GAME.prog_run then return true end
+	return (G.GAME.selected_back and G.GAME.selected_back.effect
 		and G.GAME.selected_back.effect.center
-		and G.GAME.selected_back.effect.center.key == PROG.DECK_KEY
+		and G.GAME.selected_back.effect.center.key == PROG.DECK_KEY) or false
+end
+
+-- True once you've beaten Ante 8 this run and still owe yourself a reward.
+function PROG.reward_pending()
+	if not PROG.in_run() or G.GAME.prog_reward_claimed then return false end
+	if G.GAME.prog_won then return true end
+	local ante = (G.GAME.round_resets and G.GAME.round_resets.ante) or G.GAME.ante or 1
+	return ante > 8
 end
 
 -- Preserve the merged config when calculate() swaps the back around (same trick as Cocktail)
@@ -382,15 +456,23 @@ end
 local win_game_ref = win_game
 function win_game()
 	win_game_ref()
-	if PROG.in_run() and not G.GAME.prog_reward_claimed then
-		G.E_MANAGER:add_event(Event({
-			trigger = 'after',
-			delay = 0.8,
-			func = function()
-				PROG.open_reward_menu()
-				return true
-			end,
-		}))
+	if PROG.in_run() then
+		G.GAME.prog_won = true
+		if not G.GAME.prog_reward_claimed then
+			-- Best-effort auto-open. If it fails for any reason, the reward is still
+			-- reachable from the pause/Options menu via reward_pending().
+			G.E_MANAGER:add_event(Event({
+				trigger = 'after',
+				delay = 0.8,
+				func = function()
+					local ok, err = pcall(PROG.open_reward_menu)
+					if not ok then
+						sendWarnMessage('Progression reward menu failed to open: ' .. tostring(err), 'Progression')
+					end
+					return true
+				end,
+			}))
+		end
 	end
 end
 
@@ -491,10 +573,6 @@ end
 
 function PROG.open_reward_menu()
 	PROG.reward_page = 1
-	-- Remember whether the game was paused at the win screen. If the player already
-	-- clicked Endless before this menu opened, we should resume play instead of
-	-- restoring the win screen afterwards.
-	PROG.was_paused_at_win = G.SETTINGS.paused
 	G.FUNCS.overlay_menu({ definition = PROG.reward_menu_def(), config = { no_esc = true } })
 end
 
@@ -526,7 +604,7 @@ function PROG.claim(opt)
 		UIBox_button({ button = 'prog_next_run', label = { 'Start Run ' .. st.run }, minw = 4, minh = 0.6, scale = 0.4, colour = G.C.GREEN }),
 	} }
 	rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
-		UIBox_button({ button = 'prog_back_to_win', label = { 'Keep Playing This Run' }, minw = 4, minh = 0.5, scale = 0.35, colour = G.C.BLUE }),
+		UIBox_button({ button = 'prog_close', label = { 'Keep Playing (Endless)' }, minw = 4, minh = 0.5, scale = 0.35, colour = G.C.BLUE }),
 	} }
 	rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
 		UIBox_button({ button = 'go_to_menu', label = { 'Main Menu' }, minw = 4, minh = 0.5, scale = 0.35, colour = G.C.RED }),
@@ -561,12 +639,8 @@ G.FUNCS.prog_next_run = function()
 	G.FUNCS.start_run(nil, { stake = stake })
 end
 
-G.FUNCS.prog_back_to_win = function()
-	if PROG.was_paused_at_win then
-		G.FUNCS.overlay_menu({ definition = create_UIBox_win(), config = { no_esc = true } })
-	else
-		G.FUNCS.exit_overlay_menu()
-	end
+G.FUNCS.prog_close = function()
+	G.FUNCS.exit_overlay_menu()
 end
 
 ----------------------------------------------------------------
@@ -704,12 +778,26 @@ function create_UIBox_options()
 		local target = ret and ret.nodes and ret.nodes[1] and ret.nodes[1].nodes and ret.nodes[1].nodes[1]
 			and ret.nodes[1].nodes[1].nodes and ret.nodes[1].nodes[1].nodes[1] and ret.nodes[1].nodes[1].nodes[1].nodes
 		if target then
+			-- If you've won this run but haven't picked your reward yet, surface it here.
+			-- This is the reliable path if the auto-popup on the win screen was missed.
+			if PROG.reward_pending() then
+				table.insert(target, 1, { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
+					UIBox_button({ button = 'prog_open_reward', label = { 'Choose Progression Reward' }, minw = 5, colour = G.C.GREEN }),
+				} })
+			end
 			table.insert(target, { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
 				UIBox_button({ button = 'prog_export_clipboard', label = { 'Export Progression' }, minw = 5, colour = G.C.PURPLE }),
 			} })
 		end
 	end
 	return ret
+end
+
+G.FUNCS.prog_open_reward = function()
+	local ok, err = pcall(PROG.open_reward_menu)
+	if not ok then
+		sendWarnMessage('Progression reward menu failed to open: ' .. tostring(err), 'Progression')
+	end
 end
 
 ----------------------------------------------------------------
