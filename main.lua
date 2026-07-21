@@ -84,8 +84,8 @@ function PROG.capture_playing_card(card)
 	if center and center.key and center.key ~= 'c_base' then entry.enhancement = center.key end
 	if card.edition and card.edition.key then entry.edition = card.edition.key end
 	if card.seal then entry.seal = card.seal end
-	-- Permanent per-card bonuses: Hiker chips (perma_bonus), and any modded
-	-- perma_* or retrigger ability fields, so a juiced card comes back intact.
+	-- Permanent per-card bonuses: Hiker chips (perma_bonus), permanent retriggers
+	-- (perma_repetitions), and any modded perma_* field, so a juiced card comes back.
 	local perma = {}
 	if card.ability then
 		for k, v in pairs(card.ability) do
@@ -94,6 +94,15 @@ function PROG.capture_playing_card(card)
 				perma[k] = v
 			end
 		end
+		-- Some enhancements accumulate chips/mult into the card's own bonus/mult
+		-- (e.g. All-in-Jest Fervent grows ability.bonus by 10 per score). Capture the
+		-- amount above the enhancement's default and fold it into perma_bonus/perma_mult,
+		-- which add to score regardless of the enhancement it's restored with.
+		local cfg = (center and center.config) or {}
+		local bonus_delta = (card.ability.bonus or 0) - (cfg.bonus or 0)
+		if bonus_delta ~= 0 then perma.perma_bonus = (perma.perma_bonus or 0) + bonus_delta end
+		local mult_delta = (card.ability.mult or 0) - (cfg.mult or 0)
+		if mult_delta ~= 0 then perma.perma_mult = (perma.perma_mult or 0) + mult_delta end
 	end
 	if next(perma) then entry.perma = perma end
 	return entry
@@ -119,9 +128,10 @@ function PROG.describe_card_entry(c)
 	if c.perma then
 		if c.perma.perma_bonus then parts[#parts + 1] = '+' .. c.perma.perma_bonus .. ' chips' end
 		if c.perma.perma_mult then parts[#parts + 1] = '+' .. c.perma.perma_mult .. ' mult' end
+		if c.perma.perma_repetitions then parts[#parts + 1] = '+' .. c.perma.perma_repetitions .. ' retrigger' end
 		local extras = 0
 		for k in pairs(c.perma) do
-			if k ~= 'perma_bonus' and k ~= 'perma_mult' then extras = extras + 1 end
+			if k ~= 'perma_bonus' and k ~= 'perma_mult' and k ~= 'perma_repetitions' then extras = extras + 1 end
 		end
 		if extras > 0 then parts[#parts + 1] = '+bonuses' end
 	end
