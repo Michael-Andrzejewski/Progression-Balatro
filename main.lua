@@ -82,6 +82,41 @@ local function center_name(key, set)
 	return center.name or key
 end
 
+-- Serialize any card or Joker with the game's own save format, but only keep it if it
+-- round-trips through JSON cleanly. This captures everything a mod put on the card:
+-- arbitrary ability fields, modded editions/seals/enhancements, stickers, Paperback
+-- clips, and so on. Restored later with the game's own Card:load, which calls each
+-- center's load hook, so modded state comes back intact.
+function PROG.capture_full(card)
+	local ok, saved = pcall(function() return card:save() end)
+	if not ok or type(saved) ~= 'table' or not (saved.save_fields and saved.save_fields.center) then
+		return nil
+	end
+	local enc_ok, enc = pcall(JSON.encode, saved)
+	if not enc_ok then return nil end
+	local dec_ok, dec = pcall(JSON.decode, enc)
+	if not dec_ok or type(dec) ~= 'table' then return nil end
+	return dec -- exactly what will round-trip, nothing that can break export later
+end
+
+-- Rebuild a card from a full save table using the game's own loader. Returns the Card,
+-- or nil if the needed content (e.g. a mod) isn't installed on this machine.
+function PROG.load_card_from_save(saved)
+	local sf = saved and saved.save_fields
+	if not (sf and sf.center and G.P_CENTERS[sf.center]) then return nil end
+	if sf.card and not G.P_CARDS[sf.card] then return nil end
+	loading = true
+	local card = Card(0, 0, G.CARD_W, G.CARD_H, G.P_CENTERS.j_joker, G.P_CENTERS.c_base)
+	loading = nil
+	local ok = pcall(function() card:load(copy_table(saved)) end)
+	if not ok then
+		if card and card.remove then pcall(function() card:remove() end) end
+		return nil
+	end
+	card.added_to_deck = nil -- so add_to_deck reapplies passive effects (slots, hand size)
+	return card
+end
+
 function PROG.capture_playing_card(card)
 	local entry = { rank = card.base.value, suit = card.base.suit }
 	local center = card.config.center
@@ -142,9 +177,24 @@ function PROG.describe_card_entry(c)
 	return table.concat(parts, ', ')
 end
 
--- Spawn a kept playing card straight into the deck, restoring enhancement,
--- edition, seal, and any captured permanent bonuses. Modeled on card_from_control.
+-- Spawn a kept playing card into the deck. Prefer a full-fidelity restore from the
+-- saved card; fall back to rebuilding from friendly fields (for hand-written JSON, or
+-- when the exact modded content isn't installed).
 function PROG.spawn_kept_card(entry)
+	local card = entry.save and PROG.load_card_from_save(entry.save)
+	if card then
+		G.playing_card = (G.playing_card and G.playing_card + 1) or 1
+		card.playing_card = G.playing_card
+		card:add_to_deck()
+		G.deck:emplace(card)
+		table.insert(G.playing_cards, card)
+		return
+	end
+	PROG.spawn_kept_card_basic(entry)
+end
+
+-- Field-based reconstruction: enhancement, edition, seal, and captured permanent bonuses.
+function PROG.spawn_kept_card_basic(entry)
 	local proto = PROG.card_proto(entry)
 	if not proto then return end
 	G.playing_card = (G.playing_card and G.playing_card + 1) or 1
@@ -244,7 +294,8 @@ function PROG.import_json(str)
 	if type(data.run) == 'number' and data.run >= 1 then st.run = math.floor(data.run) end
 	if type(data.cards) == 'table' then
 		for _, c in ipairs(data.cards) do
-			if type(c) == 'table' and c.rank and c.suit then
+			-- Accept a card that has a full save blob, or friendly rank+suit fields.
+			if type(c) == 'table' and (type(c.save) == 'table' or (c.rank and c.suit)) then
 				local perma = nil
 				if type(c.perma) == 'table' then
 					perma = {}
@@ -253,18 +304,25 @@ function PROG.import_json(str)
 					end
 					if not next(perma) then perma = nil end
 				end
+				local base = type(c.save) == 'table' and c.save.base or nil
 				st.cards[#st.cards + 1] = {
-					rank = tostring(c.rank), suit = tostring(c.suit),
+					rank = (c.rank and tostring(c.rank)) or (base and base.value),
+					suit = (c.suit and tostring(c.suit)) or (base and base.suit),
 					enhancement = c.enhancement, edition = c.edition, seal = c.seal,
 					perma = perma,
+					save = type(c.save) == 'table' and c.save or nil,
 				}
 			end
 		end
 	end
 	if type(data.jokers) == 'table' then
 		for _, j in ipairs(data.jokers) do
-			if type(j) == 'table' and type(j.key) == 'string' then
-				st.jokers[#st.jokers + 1] = { key = j.key, edition = j.edition }
+			if type(j) == 'table' and (type(j.save) == 'table' or type(j.key) == 'string') then
+				st.jokers[#st.jokers + 1] = {
+					key = type(j.key) == 'string' and j.key or nil,
+					edition = j.edition,
+					save = type(j.save) == 'table' and j.save or nil,
+				}
 			elseif type(j) == 'string' then
 				st.jokers[#st.jokers + 1] = { key = j }
 			end
@@ -367,15 +425,21 @@ local back_obj = SMODS.Back({
 			}))
 		end
 
-		-- Kept Jokers
+		-- Kept Jokers. Prefer a full-fidelity restore (stickers, modded editions, ability
+		-- state); fall back to key + edition when there's no save blob or the mod is absent.
 		if #st.jokers > 0 then
 			G.E_MANAGER:add_event(Event({
 				func = function()
 					for k, j in ipairs(st.jokers) do
-						if G.P_CENTERS[j.key] then
-							local card = add_joker(j.key, nil, k ~= 1)
-							if card and j.edition and G.P_CENTERS[j.edition] then
-								card:set_edition(j.edition, true, true)
+						local card = j.save and PROG.load_card_from_save(j.save)
+						if card then
+							card:add_to_deck()
+							G.jokers:emplace(card)
+							card:start_materialize(nil, k ~= 1)
+						elseif j.key and G.P_CENTERS[j.key] then
+							local c = add_joker(j.key, nil, k ~= 1)
+							if c and j.edition and G.P_CENTERS[j.edition] then
+								c:set_edition(j.edition, true, true)
 							end
 						end
 					end
@@ -492,7 +556,8 @@ function PROG.reward_options()
 		for _, card in ipairs(G.playing_cards or {}) do
 			if card.base and card.base.value and card.base.suit then
 				local entry = PROG.capture_playing_card(card)
-				opts[#opts + 1] = { label = PROG.describe_card_entry(entry), entry = entry }
+				-- keep the live card; its full save is serialized only if this one is chosen
+				opts[#opts + 1] = { label = PROG.describe_card_entry(entry), entry = entry, card = card }
 			end
 		end
 		table.sort(opts, function(a, b) return a.label < b.label end)
@@ -504,7 +569,7 @@ function PROG.reward_options()
 				if entry.edition and G.P_CENTERS[entry.edition] then
 					label = label .. ' (' .. center_name(entry.edition, 'Edition') .. ')'
 				end
-				opts[#opts + 1] = { label = label, entry = entry }
+				opts[#opts + 1] = { label = label, entry = entry, card = card }
 			end
 		end
 	elseif rtype == 'voucher' then
@@ -590,6 +655,10 @@ function PROG.claim(opt)
 	local rtype = PROG.current_reward_type
 	local kept_label = nil
 	if opt then
+		-- Serialize the chosen card/Joker in full now, so all modded state carries over.
+		if opt.card and (rtype == 'card' or rtype == 'joker') then
+			opt.entry.save = PROG.capture_full(opt.card)
+		end
 		if rtype == 'card' then st.cards[#st.cards + 1] = opt.entry
 		elseif rtype == 'joker' then st.jokers[#st.jokers + 1] = opt.entry
 		elseif rtype == 'voucher' then st.vouchers[#st.vouchers + 1] = opt.entry

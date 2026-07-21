@@ -56,7 +56,13 @@ Your progress saves automatically and survives closing the game.
 - Kept **deck effects** stack. Multiple decks are merged the way the Multiplayer Cocktail Deck does it: numeric bonuses add together, and triggered effects (Anaglyph's tags, Plasma's balancing, etc.) all fire.
 - Blind scaling levels 1 to 3 use the vanilla White/Green/Purple Stake tables. Level 4 and beyond use Steamodded's extended scaling formula, which keeps accelerating (level 4 Ante 8 is roughly 400k, level 5 roughly 900k, and up from there).
 
-Modded cards, Jokers, Vouchers, and decks are all supported. Anything whose mod isn't installed on a given machine is skipped safely at run start rather than crashing.
+### Mod compatibility
+
+Progression aims to work with almost any mod. Kept **cards** and **Jokers** are stored with the game's own save format (the same one used for run saves), so everything a mod added rides along: modded enhancements, editions, and seals, stickers, Paperback clips, and any custom ability state. When you start the next run they're rebuilt with the game's own loader, which calls each modded item's load hook, so the state comes back intact. Vouchers and deck effects are stored by their keys, so modded ones work too.
+
+If a mod isn't installed on the machine you're playing on, that item degrades gracefully: a card falls back to its rank, suit, enhancement, edition, and seal where those still exist, and anything unavailable is skipped rather than crashing. So a run shared to a friend without the same mods still loads, just without the parts their game doesn't have.
+
+One known edge case: cards carrying [Talisman](https://github.com/SMODS/Talisman) "big number" bonuses may lose the oversized value through the portable JSON format (it stores plain numbers). Everything else round-trips.
 
 ## Save, import, and export
 
