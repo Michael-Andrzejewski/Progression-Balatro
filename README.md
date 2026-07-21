@@ -27,7 +27,7 @@ A roguelite meta-progression deck for [Balatro](https://www.playbalatro.com/). B
 ## How to play
 
 1. **Start a new run** and choose the **Progression Deck**. It begins as an ordinary 52-card deck with no bonuses. Stake choice is up to you (the mod's own scaling is separate from stakes).
-2. **Win the run** by beating Ante 8. The reward picker opens automatically. If you ever miss it or dismiss it, open the **Options menu** (during the run) and click **Choose Progression Reward**. It's available there until you claim.
+2. **Win the run** by beating Ante 8. The reward picker opens automatically on the **You Win** screen.
 3. **Pick one thing to keep forever.** What you're offered depends on which run number you're on (see the table below). Choose a card, Joker, Voucher, or deck effect, or Skip it. Kept cards keep permanent bonuses too (extra chips from Hiker, etc.).
 4. **Start the next run.** Click **Start Run N** and you're dropped into a fresh run with your kept items already in place, and the blinds now scale one level faster.
 5. **Repeat.** Each win adds another permanent item and another level of blind scaling. The reward type cycles: card, then Joker, then Voucher, then deck effect, then back to a second card, and so on forever.
@@ -107,7 +107,7 @@ A series looks like:
 1. Host an **Attrition** lobby (the "4 lives" mode) and turn on **Different Decks** so each player can run their own deck.
 2. Each player chooses the **Progression Deck** in the lobby. The same Import / Export / Reset panel appears there, so you can paste in a run to start from.
 3. Play the match. Blinds scale by your run level as usual.
-4. When it's decided, **both players pick a card to carry forward**: the winner gets the reward popup automatically; either player can also open **Options -> Choose Progression Reward** during the match to pick. Then each player **Exports** their updated JSON.
+4. When it's decided, **both players pick a card to carry forward** on their end screen: the winner picks on the **You Win** screen, the loser on the **Game Over** screen. Then each player **Exports** their updated JSON.
 5. Next match, paste your JSON back in and go again. Rewards accumulate on the normal cycle (card, then Joker, then Voucher, then deck effect), so by the second match you're each carrying a card, by the third a card and a Joker, and so on.
 
 **Comeback bonus.** The match loser can start the next match with extra money. On the deck panel, use the **Comeback start** control to cycle it (`$0 / $25 / $50`), or set `"bonus_dollars": 25` in your JSON. It's applied at the start of every run until you set it back to `$0`, so the loser turns it on for their comeback match and off afterward. (BalatroMultiplayer also has a native "gold on life loss" lobby toggle if you'd rather the game hand out catch-up money automatically.)

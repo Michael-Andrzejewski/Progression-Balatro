@@ -513,15 +513,15 @@ function PROG.in_run()
 		and G.GAME.selected_back.effect.center.key == PROG.DECK_KEY) or false
 end
 
--- True when you still owe yourself a reward this run. In a multiplayer match either
--- player can claim at any point (the loser never triggers the Ante-8 win), so both can
--- pick their carry-forward card from the Options menu once the match is decided.
+-- Is a multiplayer match currently underway?
+function PROG.in_mp()
+	return (MP and MP.LOBBY and MP.LOBBY.code) and true or false
+end
+
+-- True when you still owe yourself a reward this run and haven't claimed it.
 function PROG.reward_pending()
-	if not PROG.in_run() or G.GAME.prog_reward_claimed then return false end
-	if G.GAME.prog_won then return true end
-	if MP and MP.LOBBY and MP.LOBBY.code then return true end
-	local ante = (G.GAME.round_resets and G.GAME.round_resets.ante) or G.GAME.ante or 1
-	return ante > 8
+	if not PROG.in_run() or (G.GAME and G.GAME.prog_reward_claimed) then return false end
+	return true
 end
 
 -- Preserve the merged config when calculate() swaps the back around (same trick as Cocktail)
@@ -551,27 +551,46 @@ end
 -- Win: reward selection
 ----------------------------------------------------------------
 
+-- Open the reward picker over an end-game screen. Uses the REAL timer so it fires even
+-- though the win / game-over screen pauses the game.
+function PROG.open_reward_on_end_screen()
+	G.E_MANAGER:add_event(Event({
+		trigger = 'after',
+		delay = 0.8,
+		timer = 'REAL',
+		blocking = false,
+		func = function()
+			if PROG.reward_pending() then
+				local ok, err = pcall(PROG.open_reward_menu)
+				if not ok then
+					sendWarnMessage('Progression reward menu failed to open: ' .. tostring(err), 'Progression')
+				end
+			end
+			return true
+		end,
+	}))
+end
+
+-- Win screen (single-player Ante 8, or the multiplayer match winner).
 local win_game_ref = win_game
 function win_game()
 	win_game_ref()
 	if PROG.in_run() then
 		G.GAME.prog_won = true
-		if not G.GAME.prog_reward_claimed then
-			-- Best-effort auto-open. If it fails for any reason, the reward is still
-			-- reachable from the pause/Options menu via reward_pending().
-			G.E_MANAGER:add_event(Event({
-				trigger = 'after',
-				delay = 0.8,
-				func = function()
-					local ok, err = pcall(PROG.open_reward_menu)
-					if not ok then
-						sendWarnMessage('Progression reward menu failed to open: ' .. tostring(err), 'Progression')
-					end
-					return true
-				end,
-			}))
-		end
+		if not G.GAME.prog_reward_claimed then PROG.open_reward_on_end_screen() end
 	end
+end
+
+-- Game-over screen. In a multiplayer match the loser never triggers win_game, so this
+-- is where the losing player gets to pick their carry-forward reward. (In single-player
+-- a loss just means you retry the same run level, so no reward there.)
+local cubgo_ref = create_UIBox_game_over
+function create_UIBox_game_over()
+	local ret = cubgo_ref()
+	if PROG.in_mp() and PROG.reward_pending() then
+		PROG.open_reward_on_end_screen()
+	end
+	return ret
 end
 
 function PROG.reward_options()
@@ -724,15 +743,28 @@ function PROG.claim(opt)
 	rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
 		{ n = G.UIT.T, config = { text = 'Next run is level ' .. st.run .. '. Blinds will scale faster.', scale = 0.4, colour = G.C.WHITE } },
 	} }
-	rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.08 }, nodes = {
-		UIBox_button({ button = 'prog_next_run', label = { 'Start Run ' .. st.run }, minw = 4, minh = 0.6, scale = 0.4, colour = G.C.GREEN }),
-	} }
-	rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
-		UIBox_button({ button = 'prog_close', label = { 'Keep Playing (Endless)' }, minw = 4, minh = 0.5, scale = 0.35, colour = G.C.BLUE }),
-	} }
-	rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
-		UIBox_button({ button = 'go_to_menu', label = { 'Main Menu' }, minw = 4, minh = 0.5, scale = 0.35, colour = G.C.RED }),
-	} }
+	if PROG.in_mp() then
+		-- In a multiplayer match you head back to the lobby to set up the next match.
+		rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
+			{ n = G.UIT.T, config = { text = 'Export your run, then set up the next match.', scale = 0.35, colour = G.C.WHITE } },
+		} }
+		rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.08 }, nodes = {
+			UIBox_button({ button = 'prog_export_clipboard', label = { 'Export Progression' }, minw = 4, minh = 0.5, scale = 0.35, colour = G.C.GREEN }),
+		} }
+		rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
+			UIBox_button({ button = 'go_to_menu', label = { 'Return to Lobby / Menu' }, minw = 4, minh = 0.5, scale = 0.35, colour = G.C.RED }),
+		} }
+	else
+		rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.08 }, nodes = {
+			UIBox_button({ button = 'prog_next_run', label = { 'Start Run ' .. st.run }, minw = 4, minh = 0.6, scale = 0.4, colour = G.C.GREEN }),
+		} }
+		rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
+			UIBox_button({ button = 'prog_close', label = { 'Keep Playing (Endless)' }, minw = 4, minh = 0.5, scale = 0.35, colour = G.C.BLUE }),
+		} }
+		rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
+			UIBox_button({ button = 'go_to_menu', label = { 'Main Menu' }, minw = 4, minh = 0.5, scale = 0.35, colour = G.C.RED }),
+		} }
+	end
 	G.FUNCS.overlay_menu({ definition = create_UIBox_generic_options({ no_back = true, contents = rows }), config = { no_esc = true } })
 end
 
@@ -895,26 +927,14 @@ function create_UIBox_options()
 		local target = ret and ret.nodes and ret.nodes[1] and ret.nodes[1].nodes and ret.nodes[1].nodes[1]
 			and ret.nodes[1].nodes[1].nodes and ret.nodes[1].nodes[1].nodes[1] and ret.nodes[1].nodes[1].nodes[1].nodes
 		if target then
-			-- If you've won this run but haven't picked your reward yet, surface it here.
-			-- This is the reliable path if the auto-popup on the win screen was missed.
-			if PROG.reward_pending() then
-				table.insert(target, 1, { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
-					UIBox_button({ button = 'prog_open_reward', label = { 'Choose Progression Reward' }, minw = 5, colour = G.C.GREEN }),
-				} })
-			end
+			-- The reward pick is intentionally NOT here: it's offered only on the end-game
+			-- screens (win screen, and the game-over screen in a multiplayer match).
 			table.insert(target, { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
 				UIBox_button({ button = 'prog_export_clipboard', label = { 'Export Progression' }, minw = 5, colour = G.C.PURPLE }),
 			} })
 		end
 	end
 	return ret
-end
-
-G.FUNCS.prog_open_reward = function()
-	local ok, err = pcall(PROG.open_reward_menu)
-	if not ok then
-		sendWarnMessage('Progression reward menu failed to open: ' .. tostring(err), 'Progression')
-	end
 end
 
 ----------------------------------------------------------------
