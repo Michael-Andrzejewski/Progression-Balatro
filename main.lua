@@ -55,13 +55,17 @@ function PROG.reward_type(run)
 end
 
 -- Live UI strings (referenced by ref_table text nodes so they update in place)
-PROG.ui = { summary = '', next = '', note = '' }
+PROG.ui = { summary = '', next = '', note = '', run_line = '', next_short = '', kept_line = '' }
 
 function PROG.refresh_ui_strings()
 	local st = PROG.state()
 	PROG.ui.summary = string.format('Run %d. Kept: %d cards, %d Jokers, %d Vouchers, %d deck effects.',
 		st.run, #st.cards, #st.jokers, #st.vouchers, #st.decks)
 	PROG.ui.next = 'Next reward on win: ' .. PROG.REWARD_NAMES[PROG.reward_type()]
+	-- Compact variants for the narrow deck-select panel
+	PROG.ui.run_line = 'Run ' .. st.run
+	PROG.ui.next_short = 'Next win: ' .. PROG.REWARD_NAMES[PROG.reward_type()]
+	PROG.ui.kept_line = string.format('Kept: %dc %dj %dv %dd', #st.cards, #st.jokers, #st.vouchers, #st.decks)
 end
 
 ----------------------------------------------------------------
@@ -279,7 +283,7 @@ function PROG.import_json(str)
 	mod.config.state = st
 	PROG.save()
 	PROG.refresh_ui_strings()
-	return true, string.format('Imported run %d with %d cards, %d Jokers, %d Vouchers, %d deck effects.',
+	return true, string.format('Imported: run %d, %dc %dj %dv %dd.',
 		st.run, #st.cards, #st.jokers, #st.vouchers, #st.decks)
 end
 
@@ -299,16 +303,11 @@ local back_obj = SMODS.Back({
 	loc_txt = {
 		name = 'Progression Deck',
 		text = {
-			'{C:attention}Run #1#{}: blinds scale at {C:red}level #1#{}',
-			'Carrying over {C:attention}#2#{} cards, {C:attention}#3#{} Jokers,',
-			'{C:attention}#4#{} Vouchers, {C:attention}#5#{} deck effects',
-			'Win Ante 8 to keep a {C:green}#6#{}',
+			'{C:attention}Win Ante 8{} to keep a reward forever.',
+			'Each run the blinds scale {C:red}one level faster{}.',
+			'Reward cycle: card, Joker, Voucher, deck effect.',
 		},
 	},
-	loc_vars = function(self)
-		local st = PROG.state()
-		return { vars = { st.run, #st.cards, #st.jokers, #st.vouchers, #st.decks, PROG.REWARD_NAMES[PROG.reward_type()] } }
-	end,
 	apply = function(self, back)
 		back = back or G.GAME.selected_back
 		local st = PROG.state()
@@ -449,10 +448,10 @@ function Back:change_to(new_back)
 	return change_to_ref(self, new_back)
 end
 
--- Reassert scaling after everything else has applied, and clean up the menu panel
+-- Reassert scaling after everything else has applied
 local start_run_ref = Game.start_run
 function Game:start_run(args)
-	PROG.remove_deck_panel()
+	PROG.reset_armed = nil
 	start_run_ref(self, args)
 	if PROG.in_run() then
 		G.GAME.modifiers.scaling = math.max(G.GAME.modifiers.scaling or 1, G.GAME.prog_run or PROG.state().run)
@@ -654,81 +653,54 @@ G.FUNCS.prog_close = function()
 end
 
 ----------------------------------------------------------------
--- Deck select panel (import, export, reset)
+-- Deck-select controls (import, export, reset)
+--
+-- These are injected into the Progression deck's own info panel via generate_UI.
+-- That panel is part of the deck-select overlay, so the buttons draw on top of the
+-- overlay backdrop (a separate floating UIBox sits behind it and can't be clicked)
+-- and the game rebuilds it whenever you cycle to this deck (RUN_SETUP_check_back),
+-- so the controls appear only for this deck and update on their own.
 ----------------------------------------------------------------
 
-function PROG.remove_deck_panel()
-	if PROG.deck_panel then
-		PROG.deck_panel:remove()
-		PROG.deck_panel = nil
-	end
-	PROG.reset_armed = nil
-end
-
-function PROG.create_deck_panel()
-	PROG.remove_deck_panel()
+function PROG.deck_controls_nodes()
 	PROG.refresh_ui_strings()
-	local rows = {
+	local function btn(button, label, colour)
+		return UIBox_button({ button = button, label = { label }, colour = colour, minw = 1.15, minh = 0.4, scale = 0.28, col = true })
+	end
+	-- This sits inside the deck info box, which has a WHITE background, so text must be dark.
+	return {
 		{ n = G.UIT.R, config = { align = 'cm', padding = 0.02 }, nodes = {
-			{ n = G.UIT.T, config = { text = 'Progression', scale = 0.45, colour = G.C.WHITE, shadow = true } },
+			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'run_line', scale = 0.3, colour = G.C.UI.TEXT_DARK } },
+			{ n = G.UIT.T, config = { text = '   ', scale = 0.3, colour = G.C.CLEAR } },
+			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'next_short', scale = 0.3, colour = G.C.UI.TEXT_DARK } },
 		} },
 		{ n = G.UIT.R, config = { align = 'cm', padding = 0.02 }, nodes = {
-			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'summary', scale = 0.28, colour = G.C.WHITE } },
+			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'kept_line', scale = 0.24, colour = G.C.UI.TEXT_DARK } },
+		} },
+		{ n = G.UIT.R, config = { align = 'cm', padding = 0.04 }, nodes = {
+			btn('prog_import_clipboard', 'Import', G.C.BLUE),
+			btn('prog_export_clipboard', 'Export', G.C.GREEN),
+			btn('prog_reset', 'Reset', G.C.RED),
 		} },
 		{ n = G.UIT.R, config = { align = 'cm', padding = 0.02 }, nodes = {
-			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'next', scale = 0.28, colour = G.C.WHITE } },
-		} },
-		{ n = G.UIT.R, config = { align = 'cm', padding = 0.02 }, nodes = {
-			{ n = G.UIT.T, config = { text = 'Drop a .json file on the window to import a run', scale = 0.25, colour = G.C.UI.TEXT_INACTIVE } },
-		} },
-		{ n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
-			UIBox_button({ button = 'prog_import_clipboard', label = { 'Paste Import' }, colour = G.C.BLUE, minw = 1.9, minh = 0.45, scale = 0.28, col = true }),
-			UIBox_button({ button = 'prog_export_clipboard', label = { 'Export' }, colour = G.C.GREEN, minw = 1.4, minh = 0.45, scale = 0.28, col = true }),
-			UIBox_button({ button = 'prog_reset', label = { 'Reset' }, colour = G.C.RED, minw = 1.4, minh = 0.45, scale = 0.28, col = true }),
-		} },
-		{ n = G.UIT.R, config = { align = 'cm', padding = 0.02 }, nodes = {
-			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'note', scale = 0.25, colour = G.C.GOLD } },
+			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'note', scale = 0.24, colour = G.C.UI.TEXT_DARK } },
 		} },
 	}
-	PROG.deck_panel = UIBox({
-		definition = { n = G.UIT.ROOT, config = { align = 'cm', padding = 0.15, r = 0.1, colour = { 0, 0, 0, 0.8 } }, nodes = rows },
-		config = { align = 'cm', offset = { x = -7.2, y = -3.2 }, major = G.ROOM_ATTACH, bond = 'Weak' },
-	})
 end
 
-function PROG.refresh_deck_panel()
-	local viewing = G.GAME and G.GAME.viewed_back and G.GAME.viewed_back.effect
-		and G.GAME.viewed_back.effect.center
-		and G.GAME.viewed_back.effect.center.key == PROG.DECK_KEY
-	if viewing and G.STAGE == G.STAGES.MAIN_MENU then
-		PROG.create_deck_panel()
-	else
-		PROG.remove_deck_panel()
+local generate_ui_ref = Back.generate_UI
+function Back:generate_UI(other, ui_scale, min_dims, challenge)
+	local ret = generate_ui_ref(self, other, ui_scale, min_dims, challenge)
+	-- Only for the Progression deck as the actively viewed deck in run setup (not the
+	-- collection viewer, which passes `other`).
+	local center = self.effect and self.effect.center
+	if not other and center and center.key == PROG.DECK_KEY
+		and G.GAME and G.GAME.viewed_back == self and ret and ret.nodes then
+		for _, node in ipairs(PROG.deck_controls_nodes()) do
+			ret.nodes[#ret.nodes + 1] = node
+		end
 	end
-end
-
-local cvb_ref = G.FUNCS.change_viewed_back
-G.FUNCS.change_viewed_back = function(args)
-	cvb_ref(args)
-	PROG.refresh_deck_panel()
-end
-
-local rso_ref = G.UIDEF.run_setup_option
-function G.UIDEF.run_setup_option(_type)
-	local ret = rso_ref(_type)
-	G.E_MANAGER:add_event(Event({
-		func = function()
-			PROG.refresh_deck_panel()
-			return true
-		end,
-	}))
 	return ret
-end
-
-local eom_ref = G.FUNCS.exit_overlay_menu
-G.FUNCS.exit_overlay_menu = function(e)
-	PROG.remove_deck_panel()
-	if eom_ref then return eom_ref(e) end
 end
 
 G.FUNCS.prog_import_clipboard = function()
@@ -741,7 +713,7 @@ G.FUNCS.prog_export_clipboard = function()
 	local payload = PROG.export_json()
 	love.system.setClipboardText(payload)
 	pcall(love.filesystem.write, 'progression_export.json', payload)
-	PROG.ui.note = 'Exported to clipboard and progression_export.json in the save folder.'
+	PROG.ui.note = 'Copied to clipboard + saved file.'
 	play_sound('coin1')
 end
 
@@ -750,11 +722,11 @@ G.FUNCS.prog_reset = function()
 		PROG.reset()
 		PROG.reset_armed = nil
 		PROG.refresh_ui_strings()
-		PROG.ui.note = 'Progression reset to run 1.'
+		PROG.ui.note = 'Reset to run 1.'
 		play_sound('tarot1')
 	else
 		PROG.reset_armed = true
-		PROG.ui.note = 'Click Reset again to confirm. This wipes all kept items.'
+		PROG.ui.note = 'Click Reset again to confirm.'
 	end
 end
 

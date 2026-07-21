@@ -62,7 +62,7 @@ Modded cards, Jokers, Vouchers, and decks are all supported. Anything whose mod 
 
 Your progression is stored automatically in the Steamodded config, so it persists across restarts. You can also move a run between machines or set one up by hand:
 
-- **Deck-select screen** (with the Progression Deck viewed): a panel shows your current state with **Paste Import**, **Export**, and **Reset** buttons. You can also **drag a `.json` file onto the game window** anywhere in the menus to import it.
+- **Deck-select screen** (with the Progression Deck viewed): the deck's info panel shows your current run and next reward, with **Import**, **Export**, and **Reset** buttons right below it. You can also **drag a `.json` file onto the game window** from the main menu to import it.
 - **Options menu during a run:** an **Export Progression** button copies your state to the clipboard and writes `progression_export.json` to the Balatro save folder.
 - **Mods menu:** the mod's config page has the same Import / Export / Reset controls.
 
