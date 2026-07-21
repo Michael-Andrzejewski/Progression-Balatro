@@ -50,6 +50,7 @@ Your progress saves automatically and survives closing the game.
 | 8 | Level 8 | Keep a 2nd deck effect |
 | ... | ... | the cycle loops forever |
 
+- **Re-picking upgrades.** Cards and Jokers you already kept show up in the reward list marked `[kept]`. Picking one again **updates that kept copy to its current, leveled-up state** (e.g. a King that grew from +120 to +440 chips this run) instead of adding a duplicate. Pick a different, un-kept item and it's added as a new keep. So each card/Joker round you choose: refresh an existing keep, or bring a new one.
 - Kept **cards** return with their enhancement, edition, and seal.
 - Kept **Jokers** return with their edition (Eternal/Perishable stickers are not carried).
 - Kept **Vouchers** are redeemed for free at the start of every future run.

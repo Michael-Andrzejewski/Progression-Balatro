@@ -96,6 +96,11 @@ function PROG.capture_full(card)
 	if not enc_ok then return nil end
 	local dec_ok, dec = pcall(JSON.decode, enc)
 	if not dec_ok or type(dec) ~= 'table' then return nil end
+	-- Drop our own bookkeeping markers so stored/exported data stays clean.
+	if type(dec.ability) == 'table' then
+		dec.ability.prog_kept_card = nil
+		dec.ability.prog_kept_joker = nil
+	end
 	return dec -- exactly what will round-trip, nothing that can break export later
 end
 
@@ -188,9 +193,9 @@ function PROG.spawn_kept_card(entry)
 		card:add_to_deck()
 		G.deck:emplace(card)
 		table.insert(G.playing_cards, card)
-		return
+		return card
 	end
-	PROG.spawn_kept_card_basic(entry)
+	return PROG.spawn_kept_card_basic(entry)
 end
 
 -- Field-based reconstruction: enhancement, edition, seal, and captured permanent bonuses.
@@ -215,6 +220,7 @@ function PROG.spawn_kept_card_basic(entry)
 	_card:add_to_deck()
 	G.deck:emplace(_card)
 	table.insert(G.playing_cards, _card)
+	return _card
 end
 
 -- Convert a stored card entry into a card_from_control proto ({s, r, e, d, g}).
@@ -413,11 +419,15 @@ local back_obj = SMODS.Back({
 
 		-- Kept playing cards. Spawned in a deferred event so G.deck exists and so we
 		-- can restore permanent bonuses (the extra_cards proto path can't carry those).
+		-- Tag each with its stored index so re-picking it at a reward updates it in place.
 		if #st.cards > 0 then
 			G.E_MANAGER:add_event(Event({
 				func = function()
 					if G.deck then
-						for _, c in ipairs(st.cards) do PROG.spawn_kept_card(c) end
+						for i, c in ipairs(st.cards) do
+							local card = PROG.spawn_kept_card(c)
+							if card and card.ability then card.ability.prog_kept_card = i end
+						end
 						G.GAME.starting_deck_size = #G.playing_cards
 					end
 					return true
@@ -437,11 +447,13 @@ local back_obj = SMODS.Back({
 							G.jokers:emplace(card)
 							card:start_materialize(nil, k ~= 1)
 						elseif j.key and G.P_CENTERS[j.key] then
-							local c = add_joker(j.key, nil, k ~= 1)
-							if c and j.edition and G.P_CENTERS[j.edition] then
-								c:set_edition(j.edition, true, true)
+							card = add_joker(j.key, nil, k ~= 1)
+							if card and j.edition and G.P_CENTERS[j.edition] then
+								card:set_edition(j.edition, true, true)
 							end
 						end
+						-- Tag so re-picking this Joker at a reward updates it in place.
+						if card and card.ability then card.ability.prog_kept_joker = k end
 					end
 					return true
 				end,
@@ -556,8 +568,13 @@ function PROG.reward_options()
 		for _, card in ipairs(G.playing_cards or {}) do
 			if card.base and card.base.value and card.base.suit then
 				local entry = PROG.capture_playing_card(card)
+				local label = PROG.describe_card_entry(entry)
+				-- A carried-over kept card is tagged with its stored index; re-picking it
+				-- updates that stored copy (to its current leveled state) instead of adding.
+				local kept_index = card.ability and card.ability.prog_kept_card
+				if kept_index then label = '[kept] ' .. label end
 				-- keep the live card; its full save is serialized only if this one is chosen
-				opts[#opts + 1] = { label = PROG.describe_card_entry(entry), entry = entry, card = card }
+				opts[#opts + 1] = { label = label, entry = entry, card = card, kept_index = kept_index }
 			end
 		end
 		table.sort(opts, function(a, b) return a.label < b.label end)
@@ -569,7 +586,9 @@ function PROG.reward_options()
 				if entry.edition and G.P_CENTERS[entry.edition] then
 					label = label .. ' (' .. center_name(entry.edition, 'Edition') .. ')'
 				end
-				opts[#opts + 1] = { label = label, entry = entry, card = card }
+				local kept_index = card.ability and card.ability.prog_kept_joker
+				if kept_index then label = '[kept] ' .. label end
+				opts[#opts + 1] = { label = label, entry = entry, card = card, kept_index = kept_index }
 			end
 		end
 	elseif rtype == 'voucher' then
@@ -654,13 +673,26 @@ function PROG.claim(opt)
 	local st = PROG.state()
 	local rtype = PROG.current_reward_type
 	local kept_label = nil
+	local updated_existing = false
 	if opt then
 		-- Serialize the chosen card/Joker in full now, so all modded state carries over.
 		if opt.card and (rtype == 'card' or rtype == 'joker') then
 			opt.entry.save = PROG.capture_full(opt.card)
 		end
-		if rtype == 'card' then st.cards[#st.cards + 1] = opt.entry
-		elseif rtype == 'joker' then st.jokers[#st.jokers + 1] = opt.entry
+		if rtype == 'card' then
+			if opt.kept_index and st.cards[opt.kept_index] then
+				st.cards[opt.kept_index] = opt.entry -- re-picked a kept card: update in place
+				updated_existing = true
+			else
+				st.cards[#st.cards + 1] = opt.entry
+			end
+		elseif rtype == 'joker' then
+			if opt.kept_index and st.jokers[opt.kept_index] then
+				st.jokers[opt.kept_index] = opt.entry
+				updated_existing = true
+			else
+				st.jokers[#st.jokers + 1] = opt.entry
+			end
 		elseif rtype == 'voucher' then st.vouchers[#st.vouchers + 1] = opt.entry
 		elseif rtype == 'deck' then st.decks[#st.decks + 1] = opt.entry
 		end
@@ -672,8 +704,9 @@ function PROG.claim(opt)
 	PROG.refresh_ui_strings()
 
 	local rows = {}
+	local kept_prefix = updated_existing and 'Updated: ' or 'Kept: '
 	rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
-		{ n = G.UIT.T, config = { text = kept_label and ('Kept: ' .. kept_label) or 'No reward kept.', scale = 0.5, colour = G.C.GREEN, shadow = true } },
+		{ n = G.UIT.T, config = { text = kept_label and (kept_prefix .. kept_label) or 'No reward kept.', scale = 0.5, colour = G.C.GREEN, shadow = true } },
 	} }
 	rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
 		{ n = G.UIT.T, config = { text = 'Next run is level ' .. st.run .. '. Blinds will scale faster.', scale = 0.4, colour = G.C.WHITE } },
