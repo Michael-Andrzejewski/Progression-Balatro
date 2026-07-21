@@ -98,6 +98,22 @@ To resume on another machine, install this mod (plus any content mods your run u
 - Modded content uses that mod's own keys. Unknown or invalid keys are skipped at run start, so importing on a machine with different mods will not crash.
 - Importing **overwrites** your current progression state.
 
+## Multiplayer (via JSON, with BalatroMultiplayer)
+
+You can run a progression series against another player using [BalatroMultiplayer](https://github.com/Balatro-Multiplayer/BalatroMultiplayer). There's no live syncing — the JSON export/import is the sync, so each player just configures their own Progression deck between matches. Both players need the same Progression and Multiplayer versions.
+
+A series looks like:
+
+1. Host an **Attrition** lobby (the "4 lives" mode) and turn on **Different Decks** so each player can run their own deck.
+2. Each player chooses the **Progression Deck** in the lobby. The same Import / Export / Reset panel appears there, so you can paste in a run to start from.
+3. Play the match. Blinds scale by your run level as usual.
+4. When it's decided, **both players pick a card to carry forward**: the winner gets the reward popup automatically; either player can also open **Options -> Choose Progression Reward** during the match to pick. Then each player **Exports** their updated JSON.
+5. Next match, paste your JSON back in and go again. Rewards accumulate on the normal cycle (card, then Joker, then Voucher, then deck effect), so by the second match you're each carrying a card, by the third a card and a Joker, and so on.
+
+**Comeback bonus.** The match loser can start the next match with extra money. On the deck panel, use the **Comeback start** control to cycle it (`$0 / $25 / $50`), or set `"bonus_dollars": 25` in your JSON. It's applied at the start of every run until you set it back to `$0`, so the loser turns it on for their comeback match and off afterward. (BalatroMultiplayer also has a native "gold on life loss" lobby toggle if you'd rather the game hand out catch-up money automatically.)
+
+This is new and hasn't been battle-tested across two clients yet — if the deck desyncs in a match or the scaling doesn't take, let me know and it can be adjusted.
+
 ## Known limitations
 
 - Rewards are chosen from a text list rather than clickable card art in this version.

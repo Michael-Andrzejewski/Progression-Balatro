@@ -23,7 +23,7 @@ local PAGE_SIZE = 8
 -- }
 
 local function default_state()
-	return { run = 1, cards = {}, jokers = {}, vouchers = {}, decks = {} }
+	return { run = 1, cards = {}, jokers = {}, vouchers = {}, decks = {}, bonus_dollars = 0 }
 end
 
 function PROG.state()
@@ -34,6 +34,7 @@ function PROG.state()
 	st.jokers = st.jokers or {}
 	st.vouchers = st.vouchers or {}
 	st.decks = st.decks or {}
+	st.bonus_dollars = st.bonus_dollars or 0
 	return st
 end
 
@@ -55,7 +56,7 @@ function PROG.reward_type(run)
 end
 
 -- Live UI strings (referenced by ref_table text nodes so they update in place)
-PROG.ui = { summary = '', next = '', note = '', run_line = '', next_short = '', kept_line = '' }
+PROG.ui = { summary = '', next = '', note = '', run_line = '', next_short = '', kept_line = '', comeback = '' }
 
 function PROG.refresh_ui_strings()
 	local st = PROG.state()
@@ -66,6 +67,7 @@ function PROG.refresh_ui_strings()
 	PROG.ui.run_line = 'Run ' .. st.run
 	PROG.ui.next_short = 'Next win: ' .. PROG.REWARD_NAMES[PROG.reward_type()]
 	PROG.ui.kept_line = string.format('Kept: %dc %dj %dv %dd', #st.cards, #st.jokers, #st.vouchers, #st.decks)
+	PROG.ui.comeback = 'Comeback start: $' .. (st.bonus_dollars or 0)
 end
 
 ----------------------------------------------------------------
@@ -289,6 +291,7 @@ function PROG.export_json()
 		jokers = st.jokers,
 		vouchers = st.vouchers,
 		decks = st.decks,
+		bonus_dollars = st.bonus_dollars,
 	})
 end
 
@@ -298,6 +301,7 @@ function PROG.import_json(str)
 	if not ok or type(data) ~= 'table' then return false, 'Import failed. That is not valid JSON.' end
 	local st = default_state()
 	if type(data.run) == 'number' and data.run >= 1 then st.run = math.floor(data.run) end
+	if type(data.bonus_dollars) == 'number' then st.bonus_dollars = math.floor(data.bonus_dollars) end
 	if type(data.cards) == 'table' then
 		for _, c in ipairs(data.cards) do
 			-- Accept a card that has a full save blob, or friendly rank+suit fields.
@@ -475,6 +479,12 @@ local back_obj = SMODS.Back({
 				}))
 			end
 		end
+
+		-- Comeback bonus: extra starting dollars (e.g. $25 for the match loser). Set per
+		-- machine via the deck panel or the JSON; applied every run until you turn it off.
+		if (st.bonus_dollars or 0) ~= 0 then
+			G.GAME.starting_params.dollars = (G.GAME.starting_params.dollars or 0) + st.bonus_dollars
+		end
 	end,
 	calculate = function(self, back, context)
 		-- Fan out trigger effects (Anaglyph tags, Plasma balancing) to kept deck effects
@@ -503,10 +513,13 @@ function PROG.in_run()
 		and G.GAME.selected_back.effect.center.key == PROG.DECK_KEY) or false
 end
 
--- True once you've beaten Ante 8 this run and still owe yourself a reward.
+-- True when you still owe yourself a reward this run. In a multiplayer match either
+-- player can claim at any point (the loser never triggers the Ante-8 win), so both can
+-- pick their carry-forward card from the Options menu once the match is decided.
 function PROG.reward_pending()
 	if not PROG.in_run() or G.GAME.prog_reward_claimed then return false end
 	if G.GAME.prog_won then return true end
+	if MP and MP.LOBBY and MP.LOBBY.code then return true end
 	local ante = (G.GAME.round_resets and G.GAME.round_resets.ante) or G.GAME.ante or 1
 	return ante > 8
 end
@@ -784,10 +797,30 @@ function PROG.deck_controls_nodes()
 			btn('prog_export_clipboard', 'Export', G.C.GREEN),
 			btn('prog_reset', 'Reset', G.C.RED),
 		} },
+		{ n = G.UIT.R, config = { align = 'cm', padding = 0.03 }, nodes = {
+			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'comeback', scale = 0.26, colour = G.C.UI.TEXT_DARK } },
+			{ n = G.UIT.T, config = { text = '  ', scale = 0.26, colour = G.C.CLEAR } },
+			UIBox_button({ button = 'prog_cycle_comeback', label = { 'change' }, colour = G.C.ORANGE, minw = 1.2, minh = 0.4, scale = 0.26, col = true }),
+		} },
 		{ n = G.UIT.R, config = { align = 'cm', padding = 0.02 }, nodes = {
 			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'note', scale = 0.24, colour = G.C.UI.TEXT_DARK } },
 		} },
 	}
+end
+
+-- The comeback bonus (extra starting dollars, e.g. for the match loser) cycles 0/25/50.
+PROG.COMEBACK_STEPS = { 0, 25, 50 }
+
+G.FUNCS.prog_cycle_comeback = function()
+	local st = PROG.state()
+	local cur = st.bonus_dollars or 0
+	local idx = 1
+	for i, v in ipairs(PROG.COMEBACK_STEPS) do if v == cur then idx = i end end
+	st.bonus_dollars = PROG.COMEBACK_STEPS[(idx % #PROG.COMEBACK_STEPS) + 1]
+	PROG.save()
+	PROG.refresh_ui_strings()
+	PROG.ui.note = 'Comeback start set to $' .. st.bonus_dollars .. '.'
+	play_sound('button', 1, 0.4)
 end
 
 local generate_ui_ref = Back.generate_UI
