@@ -106,7 +106,7 @@ You can run a progression series against another player using [BalatroMultiplaye
 A series looks like:
 
 1. Host an **Attrition** lobby (the "4 lives" mode) and turn on **Different Decks** so each player can run their own deck.
-2. Each player chooses the **Progression Deck** in the lobby. The same Import / Export / Reset panel appears there, so you can paste in a run to start from.
+2. Each player chooses the **Progression Deck** in the lobby. A **Progression panel with Import / Export / Comeback buttons sits right on the lobby screen** for both the host and the joiner, so either player can paste in their JSON there. (The full deck panel also appears inside Choose Deck; note the joiner's Choose Deck button only unlocks when the host enables Different Decks.)
 3. Play the match. Blinds scale by your run level as usual.
 4. When it's decided, **both players re-select their loadout** on their end screen: the winner on the **You Win** screen, the loser on the **Game Over** screen. Then each player **Exports** their updated JSON.
 5. Next match, paste your JSON back in and go again. Rewards accumulate on the normal cycle (card, then Joker, then Voucher, then deck effect), so by the second match you're each carrying a card, by the third a card and a Joker, and so on.

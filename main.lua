@@ -976,6 +976,65 @@ G.FUNCS.prog_reset = function()
 end
 
 ----------------------------------------------------------------
+-- Multiplayer lobby panel
+--
+-- In a BalatroMultiplayer lobby the joiner can only open the deck-select overlay
+-- (where the deck panel's Import lives) if the host enabled Different Decks, so
+-- without it they have no way to paste their JSON. This puts the same controls on
+-- the lobby screen itself, for host and joiner alike, whatever the lobby options.
+-- The lobby screen is dark, so text is light here. Installed lazily from
+-- Game:main_menu because load order vs the Multiplayer mod isn't guaranteed.
+----------------------------------------------------------------
+
+function PROG.lobby_panel_def()
+	PROG.refresh_ui_strings()
+	local function btn(button, label, colour, minw)
+		return UIBox_button({ button = button, label = { label }, colour = colour, minw = minw or 1.4, minh = 0.45, scale = 0.28, col = true })
+	end
+	return { n = G.UIT.R, config = { align = 'cm', padding = 0.12, r = 0.1, emboss = 0.1, colour = G.C.L_BLACK }, nodes = {
+		{ n = G.UIT.R, config = { align = 'cm', padding = 0.02 }, nodes = {
+			{ n = G.UIT.T, config = { text = 'Progression:  ', scale = 0.3, colour = G.C.UI.TEXT_LIGHT } },
+			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'run_line', scale = 0.3, colour = G.C.UI.TEXT_LIGHT } },
+			{ n = G.UIT.T, config = { text = '   ', scale = 0.3, colour = G.C.CLEAR } },
+			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'kept_line', scale = 0.3, colour = G.C.UI.TEXT_LIGHT } },
+		} },
+		{ n = G.UIT.R, config = { align = 'cm', padding = 0.04 }, nodes = {
+			btn('prog_import_clipboard', 'Import', G.C.BLUE),
+			btn('prog_export_clipboard', 'Export', G.C.GREEN),
+			btn('prog_cycle_comeback', 'Comeback $', G.C.ORANGE, 1.7),
+		} },
+		{ n = G.UIT.R, config = { align = 'cm', padding = 0.02 }, nodes = {
+			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'comeback', scale = 0.26, colour = G.C.UI.TEXT_LIGHT } },
+			{ n = G.UIT.T, config = { text = '   ', scale = 0.26, colour = G.C.CLEAR } },
+			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'note', scale = 0.26, colour = G.C.UI.TEXT_LIGHT } },
+		} },
+	} }
+end
+
+local function install_mp_lobby_panel()
+	if PROG.mp_lobby_hooked then return end
+	if not (MP and G.UIDEF and G.UIDEF.create_UIBox_lobby_menu) then return end
+	PROG.mp_lobby_hooked = true
+	local lobby_menu_ref = G.UIDEF.create_UIBox_lobby_menu
+	G.UIDEF.create_UIBox_lobby_menu = function(...)
+		local t = lobby_menu_ref(...)
+		-- Append below the lobby's button row; pcall so a Multiplayer layout change
+		-- degrades to a panel-less lobby instead of a crash.
+		pcall(function()
+			local col = t and t.nodes and t.nodes[1]
+			if col and col.nodes then col.nodes[#col.nodes + 1] = PROG.lobby_panel_def() end
+		end)
+		return t
+	end
+end
+
+local main_menu_ref = Game.main_menu
+function Game:main_menu(...)
+	install_mp_lobby_panel()
+	return main_menu_ref(self, ...)
+end
+
+----------------------------------------------------------------
 -- JSON file drop
 ----------------------------------------------------------------
 
