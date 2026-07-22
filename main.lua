@@ -157,6 +157,7 @@ end
 function PROG.capture_joker(card)
 	local entry = { key = card.config.center.key }
 	if card.edition and card.edition.key then entry.edition = card.edition.key end
+	if type(card.sell_cost) == 'number' then entry.sell_cost = card.sell_cost end
 	return entry
 end
 
@@ -331,6 +332,7 @@ function PROG.import_json(str)
 				st.jokers[#st.jokers + 1] = {
 					key = type(j.key) == 'string' and j.key or nil,
 					edition = j.edition,
+					sell_cost = type(j.sell_cost) == 'number' and j.sell_cost or nil,
 					save = type(j.save) == 'table' and j.save or nil,
 				}
 			elseif type(j) == 'string' then
@@ -456,6 +458,8 @@ local back_obj = SMODS.Back({
 								card:set_edition(j.edition, true, true)
 							end
 						end
+						-- Apply a saved sell value last, since set_edition/add_to_deck recompute it.
+						if card and type(j.sell_cost) == 'number' then card.sell_cost = j.sell_cost end
 						-- Tag so re-picking this Joker at a reward updates it in place.
 						if card and card.ability then card.ability.prog_kept_joker = k end
 					end
