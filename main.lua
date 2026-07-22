@@ -457,9 +457,14 @@ local back_obj = SMODS.Back({
 							if card and j.edition and G.P_CENTERS[j.edition] then
 								card:set_edition(j.edition, true, true)
 							end
+							-- Pin sell value. sell_cost is always recomputed as floor(cost/2) +
+							-- ability.extra_value, so we bump extra_value by the shortfall (that's
+							-- the same field the game uses to make sell value stick) and recompute.
+							if card and type(j.sell_cost) == 'number' and card.set_cost then
+								card.ability.extra_value = (card.ability.extra_value or 0) + (j.sell_cost - (card.sell_cost or 0))
+								card:set_cost()
+							end
 						end
-						-- Apply a saved sell value last, since set_edition/add_to_deck recompute it.
-						if card and type(j.sell_cost) == 'number' then card.sell_cost = j.sell_cost end
 						-- Tag so re-picking this Joker at a reward updates it in place.
 						if card and card.ability then card.ability.prog_kept_joker = k end
 					end
