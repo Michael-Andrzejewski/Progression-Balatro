@@ -461,8 +461,12 @@ local back_obj = SMODS.Back({
 							-- ability.extra_value, so we bump extra_value by the shortfall (that's
 							-- the same field the game uses to make sell value stick) and recompute.
 							if card and type(j.sell_cost) == 'number' and card.set_cost then
-								card.ability.extra_value = (card.ability.extra_value or 0) + (j.sell_cost - (card.sell_cost or 0))
-								card:set_cost()
+								card:set_cost() -- fold the edition's cost bump in before measuring
+								local shortfall = j.sell_cost - (card.sell_cost or 0)
+								if shortfall ~= 0 then
+									card.ability.extra_value = (card.ability.extra_value or 0) + shortfall
+									card:set_cost()
+								end
 							end
 						end
 						-- Tag so re-picking this Joker at a reward updates it in place.
