@@ -27,30 +27,31 @@ A roguelite meta-progression deck for [Balatro](https://www.playbalatro.com/). B
 ## How to play
 
 1. **Start a new run** and choose the **Progression Deck**. It begins as an ordinary 52-card deck with no bonuses. Stake choice is up to you (the mod's own scaling is separate from stakes).
-2. **Win the run** by beating Ante 8. The reward picker opens automatically on the **You Win** screen.
-3. **Pick one thing to keep forever.** What you're offered depends on which run number you're on (see the table below). Choose a card, Joker, Voucher, or deck effect, or Skip it. Kept cards keep permanent bonuses too (extra chips from Hiker, etc.).
-4. **Start the next run.** Click **Start Run N** and you're dropped into a fresh run with your kept items already in place, and the blinds now scale one level faster.
-5. **Repeat.** Each win adds another permanent item and another level of blind scaling. The reward type cycles: card, then Joker, then Voucher, then deck effect, then back to a second card, and so on forever.
+2. **Win the run** by beating Ante 8. The reward flow opens automatically on the **You Win** screen.
+3. **Re-select your whole loadout.** You step through cards, then Jokers, then Vouchers, then deck effects, choosing up to the number of each you've unlocked. Your currently-kept items are **pre-checked**, so usually you just confirm; deselect one to drop it, or check a different one to swap. Everything is captured at its **current, leveled-up state** (a Joker's grown sell value, a card's accumulated chips, etc.).
+4. **Start the next run.** Click **Start Run N** and you're dropped into a fresh run with your selected loadout in place, and the blinds now scale one level faster.
+5. **Repeat.** Each win unlocks one more keep-slot and another level of blind scaling. The slot type cycles: card, then Joker, then Voucher, then deck effect, then a 2nd card, and so on forever.
 
 If you **lose**, nothing is lost. You restart the same run level with the same kept items and can try again.
 
 Your progress saves automatically and survives closing the game.
 
-### Reward cycle
+### Keep-slots by run
 
-| Run | Blinds scale at | Reward for winning |
-|-----|-----------------|--------------------|
-| 1 | Level 1 (White Stake pace) | Keep 1 playing card from your deck |
-| 2 | Level 2 (Green Stake pace) | Keep 1 Joker you're holding |
-| 3 | Level 3 (Purple Stake pace) | Keep 1 Voucher you redeemed |
-| 4 | Level 4 (faster still) | Keep 1 deck effect (any unlocked deck) |
-| 5 | Level 5 | Keep a 2nd playing card |
-| 6 | Level 6 | Keep a 2nd Joker |
-| 7 | Level 7 | Keep a 2nd Voucher |
-| 8 | Level 8 | Keep a 2nd deck effect |
-| ... | ... | the cycle loops forever |
+Each win unlocks one more slot, cycling through the four types. You re-select your full loadout every run, so this table shows how many of each you may keep after winning that run:
 
-- **Re-picking upgrades.** Cards and Jokers you already kept show up in the reward list marked `[kept]`. Picking one again **updates that kept copy to its current, leveled-up state** (e.g. a King that grew from +120 to +440 chips this run) instead of adding a duplicate. Pick a different, un-kept item and it's added as a new keep. So each card/Joker round you choose: refresh an existing keep, or bring a new one.
+| Run | Blinds scale at | Cards | Jokers | Vouchers | Deck effects |
+|-----|-----------------|-------|--------|----------|--------------|
+| 1 | Level 1 (White Stake pace) | 1 | – | – | – |
+| 2 | Level 2 (Green Stake pace) | 1 | 1 | – | – |
+| 3 | Level 3 (Purple Stake pace) | 1 | 1 | 1 | – |
+| 4 | Level 4 (faster still) | 1 | 1 | 1 | 1 |
+| 5 | Level 5 | 2 | 1 | 1 | 1 |
+| 6 | Level 6 | 2 | 2 | 1 | 1 |
+| ... | ... | | | | the cycle loops forever |
+
+Because you re-select every run, a kept item always carries its **current** state forward. There's no "stale copy" problem: if your Blueprint's sell value grew or your King gained chips this run, re-confirming it at the reward screen saves the grown version.
+
 - Kept **cards** return with their enhancement, edition, and seal.
 - Kept **Jokers** return with their edition (Eternal/Perishable stickers are not carried).
 - Kept **Vouchers** are redeemed for free at the start of every future run.
@@ -107,7 +108,7 @@ A series looks like:
 1. Host an **Attrition** lobby (the "4 lives" mode) and turn on **Different Decks** so each player can run their own deck.
 2. Each player chooses the **Progression Deck** in the lobby. The same Import / Export / Reset panel appears there, so you can paste in a run to start from.
 3. Play the match. Blinds scale by your run level as usual.
-4. When it's decided, **both players pick a card to carry forward** on their end screen: the winner picks on the **You Win** screen, the loser on the **Game Over** screen. Then each player **Exports** their updated JSON.
+4. When it's decided, **both players re-select their loadout** on their end screen: the winner on the **You Win** screen, the loser on the **Game Over** screen. Then each player **Exports** their updated JSON.
 5. Next match, paste your JSON back in and go again. Rewards accumulate on the normal cycle (card, then Joker, then Voucher, then deck effect), so by the second match you're each carrying a card, by the third a card and a Joker, and so on.
 
 **Comeback bonus.** The match loser can start the next match with extra money. On the deck panel, use the **Comeback start** control to cycle it (`$0 / $25 / $50`), or set `"bonus_dollars": 25` in your JSON. It's applied at the start of every run until you set it back to `$0`, so the loser turns it on for their comeback match and off afterward. (BalatroMultiplayer also has a native "gold on life loss" lobby toggle if you'd rather the game hand out catch-up money automatically.)

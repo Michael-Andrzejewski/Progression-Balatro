@@ -593,24 +593,38 @@ function create_UIBox_game_over()
 	return ret
 end
 
-function PROG.reward_options()
-	local rtype = PROG.reward_type(G.GAME.prog_run)
+-- How many of each type you may keep after winning `run`. Each win unlocks one more
+-- slot, cycling card -> Joker -> Voucher -> deck effect. You re-select your whole
+-- loadout every run, so kept items are always re-captured at their current state.
+PROG.CATS = { 'card', 'joker', 'voucher', 'deck' }
+PROG.CAT_PLURAL = { card = 'cards', joker = 'Jokers', voucher = 'Vouchers', deck = 'deck effects' }
+
+function PROG.slot_counts(run)
+	run = run or (G.GAME and G.GAME.prog_run) or PROG.state().run
+	return {
+		card = math.floor((run + 3) / 4),
+		joker = math.floor((run + 2) / 4),
+		voucher = math.floor((run + 1) / 4),
+		deck = math.floor(run / 4),
+	}
+end
+
+-- The selectable items in the current run for one category, with `preselect` set on the
+-- items you're already keeping so they come pre-checked.
+function PROG.category_options(cat)
 	local opts = {}
-	if rtype == 'card' then
+	if cat == 'card' then
 		for _, card in ipairs(G.playing_cards or {}) do
 			if card.base and card.base.value and card.base.suit then
 				local entry = PROG.capture_playing_card(card)
-				local label = PROG.describe_card_entry(entry)
-				-- A carried-over kept card is tagged with its stored index; re-picking it
-				-- updates that stored copy (to its current leveled state) instead of adding.
-				local kept_index = card.ability and card.ability.prog_kept_card
-				if kept_index then label = '[kept] ' .. label end
-				-- keep the live card; its full save is serialized only if this one is chosen
-				opts[#opts + 1] = { label = label, entry = entry, card = card, kept_index = kept_index }
+				opts[#opts + 1] = {
+					label = PROG.describe_card_entry(entry), card = card, entry = entry,
+					preselect = card.ability and card.ability.prog_kept_card and true or false,
+				}
 			end
 		end
 		table.sort(opts, function(a, b) return a.label < b.label end)
-	elseif rtype == 'joker' then
+	elseif cat == 'joker' then
 		for _, card in ipairs((G.jokers and G.jokers.cards) or {}) do
 			if card.ability and card.ability.set == 'Joker' and card.config.center then
 				local entry = PROG.capture_joker(card)
@@ -618,135 +632,207 @@ function PROG.reward_options()
 				if entry.edition and G.P_CENTERS[entry.edition] then
 					label = label .. ' (' .. center_name(entry.edition, 'Edition') .. ')'
 				end
-				local kept_index = card.ability and card.ability.prog_kept_joker
-				if kept_index then label = '[kept] ' .. label end
-				opts[#opts + 1] = { label = label, entry = entry, card = card, kept_index = kept_index }
+				if card.sell_cost then label = label .. ' [sell $' .. tostring(card.sell_cost) .. ']' end
+				opts[#opts + 1] = {
+					label = label, card = card, entry = entry,
+					preselect = card.ability.prog_kept_joker and true or false,
+				}
 			end
 		end
-	elseif rtype == 'voucher' then
-		local skip = G.GAME.prog_start_vouchers or {}
+	elseif cat == 'voucher' then
+		local kept = G.GAME.prog_start_vouchers or {}
 		for k, v in pairs(G.GAME.used_vouchers or {}) do
-			if v and not skip[k] and G.P_CENTERS[k] then
-				opts[#opts + 1] = { label = center_name(k, 'Voucher'), entry = k }
+			if v and G.P_CENTERS[k] then
+				opts[#opts + 1] = { label = center_name(k, 'Voucher'), key = k, preselect = kept[k] and true or false }
 			end
 		end
 		table.sort(opts, function(a, b) return a.label < b.label end)
-	elseif rtype == 'deck' then
+	elseif cat == 'deck' then
 		local st = PROG.state()
-		-- b_cry_antimatter and b_akyrs_hardcore_challenges misbehave outside their own
-		-- context (the Cocktail deck blacklists them for the same reason)
+		local keptset = {}
+		for _, d in ipairs(st.decks) do keptset[d] = true end
 		local excluded = {
-			b_challenge = true,
-			b_mp_cocktail = true,
-			b_cry_antimatter = true,
-			b_akyrs_hardcore_challenges = true,
-			[PROG.DECK_KEY] = true,
+			b_challenge = true, b_mp_cocktail = true, b_cry_antimatter = true,
+			b_akyrs_hardcore_challenges = true, [PROG.DECK_KEY] = true,
 		}
-		for _, d in ipairs(st.decks) do excluded[d] = true end
 		for _, center in ipairs(G.P_CENTER_POOLS.Back or {}) do
 			if center.unlocked and not center.omit and not excluded[center.key] then
-				opts[#opts + 1] = { label = center_name(center.key, 'Back'), entry = center.key }
+				opts[#opts + 1] = { label = center_name(center.key, 'Back'), key = center.key, preselect = keptset[center.key] and true or false }
 			end
 		end
+		table.sort(opts, function(a, b) return a.label < b.label end)
 	end
-	return opts, rtype
+	return opts
 end
 
 PROG.reward_page = 1
 
-function PROG.reward_menu_def()
-	local opts, rtype = PROG.reward_options()
-	PROG.current_opts = opts
-	PROG.current_reward_type = rtype
+function PROG.begin_reward()
+	PROG.counts = PROG.slot_counts()
+	PROG.cat_queue = {}
+	for _, c in ipairs(PROG.CATS) do
+		if (PROG.counts[c] or 0) > 0 then PROG.cat_queue[#PROG.cat_queue + 1] = c end
+	end
+	PROG.cat_i = 1
+	PROG.cat_opts = {}
+	PROG.sel = { card = {}, joker = {}, voucher = {}, deck = {} }
+	PROG.reward_page = 1
+	PROG.show_reward_step()
+end
+
+-- Backwards-compatible entry point used by the end-screen hooks.
+function PROG.open_reward_menu()
+	PROG.begin_reward()
+end
+
+local function sel_count(set)
+	local n = 0
+	for _ in pairs(set) do n = n + 1 end
+	return n
+end
+
+function PROG.show_reward_step()
+	local cat = PROG.cat_queue and PROG.cat_queue[PROG.cat_i]
+	if not cat then return PROG.finalize_reward() end
+	if not PROG.cat_opts[cat] then
+		PROG.cat_opts[cat] = PROG.category_options(cat)
+		-- Pre-check the items you're already keeping, up to this category's limit.
+		local lim, n = PROG.counts[cat], 0
+		for i, o in ipairs(PROG.cat_opts[cat]) do
+			if o.preselect and n < lim then PROG.sel[cat][i] = true; n = n + 1 end
+		end
+	end
+	G.FUNCS.overlay_menu({ definition = PROG.reward_step_def(cat), config = { no_esc = true } })
+end
+
+function PROG.reward_step_def(cat)
+	local opts = PROG.cat_opts[cat] or {}
+	local lim = PROG.counts[cat] or 0
+	local sel = PROG.sel[cat]
+	local seln = sel_count(sel)
 	local pages = math.max(1, math.ceil(#opts / PAGE_SIZE))
 	if PROG.reward_page > pages then PROG.reward_page = pages end
 	if PROG.reward_page < 1 then PROG.reward_page = 1 end
 	local start_i = (PROG.reward_page - 1) * PAGE_SIZE
 
+	local function T(text, scale, colour) return { n = G.UIT.R, config = { align = 'cm', padding = 0.03 }, nodes = {
+		{ n = G.UIT.T, config = { text = text, scale = scale, colour = colour } },
+	} } end
+
 	local rows = {}
-	rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
-		{ n = G.UIT.T, config = { text = 'Run ' .. tostring(G.GAME.prog_run or PROG.state().run) .. ' complete!', scale = 0.6, colour = G.C.GREEN, shadow = true } },
-	} }
-	local prompt
-	if #opts > 0 then
-		prompt = 'Choose a ' .. PROG.REWARD_NAMES[rtype] .. ' to keep for all future runs:'
-	else
-		prompt = 'No ' .. PROG.REWARD_NAMES[rtype] .. ' available to keep this time.'
+	rows[#rows + 1] = T('Run ' .. tostring(G.GAME.prog_run or PROG.state().run) .. ' complete', 0.55, G.C.GREEN)
+	rows[#rows + 1] = T('Keep up to ' .. lim .. ' ' .. PROG.CAT_PLURAL[cat] .. '   (' .. seln .. '/' .. lim .. ' chosen)', 0.4, G.C.WHITE)
+	if #opts == 0 then
+		rows[#rows + 1] = T('None available this run.', 0.35, G.C.UI.TEXT_INACTIVE)
 	end
-	rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
-		{ n = G.UIT.T, config = { text = prompt, scale = 0.4, colour = G.C.WHITE } },
-	} }
 	for i = start_i + 1, math.min(start_i + PAGE_SIZE, #opts) do
-		rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.03 }, nodes = {
-			UIBox_button({ id = 'prog_opt_' .. i, button = 'prog_pick', label = { opts[i].label }, minw = 5.5, minh = 0.5, scale = 0.35, colour = G.C.BLUE }),
+		local o = opts[i]
+		local on = sel[i]
+		rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.025 }, nodes = {
+			UIBox_button({ id = 'prog_sel_' .. i, button = 'prog_toggle', label = { (on and 'KEEP  ' or '') .. o.label }, minw = 5.6, minh = 0.48, scale = 0.32, colour = on and G.C.GREEN or G.C.BLUE }),
 		} }
 	end
 	if pages > 1 then
 		rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
-			UIBox_button({ id = 'prog_prev', button = 'prog_page_prev', label = { '<' }, minw = 0.7, minh = 0.5, scale = 0.35, colour = G.C.ORANGE, col = true }),
+			UIBox_button({ button = 'prog_page_prev', label = { '<' }, minw = 0.7, minh = 0.5, scale = 0.35, colour = G.C.ORANGE, col = true }),
 			{ n = G.UIT.C, config = { align = 'cm', minw = 1.6 }, nodes = {
 				{ n = G.UIT.T, config = { text = ' ' .. PROG.reward_page .. ' / ' .. pages .. ' ', scale = 0.35, colour = G.C.WHITE } },
 			} },
-			UIBox_button({ id = 'prog_next', button = 'prog_page_next', label = { '>' }, minw = 0.7, minh = 0.5, scale = 0.35, colour = G.C.ORANGE, col = true }),
+			UIBox_button({ button = 'prog_page_next', label = { '>' }, minw = 0.7, minh = 0.5, scale = 0.35, colour = G.C.ORANGE, col = true }),
 		} }
 	end
-	rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.08 }, nodes = {
-		UIBox_button({ button = 'prog_skip', label = { (#opts > 0) and 'Skip reward' or 'Continue' }, minw = 3, minh = 0.5, scale = 0.35, colour = G.C.GREY }),
-	} }
+	local nav = {}
+	if PROG.cat_i > 1 then
+		nav[#nav + 1] = UIBox_button({ button = 'prog_step_back', label = { 'Back' }, minw = 1.6, minh = 0.5, scale = 0.32, colour = G.C.ORANGE, col = true })
+	end
+	local last = PROG.cat_i >= #PROG.cat_queue
+	nav[#nav + 1] = UIBox_button({ button = 'prog_step_next', label = { last and 'Confirm loadout' or 'Next' }, minw = 2.2, minh = 0.5, scale = 0.32, colour = G.C.GREEN, col = true })
+	rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.08 }, nodes = nav }
 	return create_UIBox_generic_options({ no_back = true, contents = rows })
 end
 
-function PROG.open_reward_menu()
-	PROG.reward_page = 1
-	G.FUNCS.overlay_menu({ definition = PROG.reward_menu_def(), config = { no_esc = true } })
+G.FUNCS.prog_toggle = function(e)
+	local id = e and e.config and e.config.id
+	local i = id and tonumber(string.match(tostring(id), '(%d+)$'))
+	if not i then return end
+	local cat = PROG.cat_queue[PROG.cat_i]
+	local sel = PROG.sel[cat]
+	if sel[i] then
+		sel[i] = nil
+	elseif sel_count(sel) < (PROG.counts[cat] or 0) then
+		sel[i] = true
+	else
+		play_sound('cancel')
+		return
+	end
+	G.FUNCS.overlay_menu({ definition = PROG.reward_step_def(cat), config = { no_esc = true } })
 end
 
-function PROG.claim(opt)
+G.FUNCS.prog_step_next = function()
+	PROG.cat_i = PROG.cat_i + 1
+	PROG.reward_page = 1
+	PROG.show_reward_step()
+end
+
+G.FUNCS.prog_step_back = function()
+	PROG.cat_i = math.max(1, PROG.cat_i - 1)
+	PROG.reward_page = 1
+	PROG.show_reward_step()
+end
+
+G.FUNCS.prog_page_prev = function()
+	PROG.reward_page = PROG.reward_page - 1
+	G.FUNCS.overlay_menu({ definition = PROG.reward_step_def(PROG.cat_queue[PROG.cat_i]), config = { no_esc = true } })
+end
+
+G.FUNCS.prog_page_next = function()
+	PROG.reward_page = PROG.reward_page + 1
+	G.FUNCS.overlay_menu({ definition = PROG.reward_step_def(PROG.cat_queue[PROG.cat_i]), config = { no_esc = true } })
+end
+
+-- Write the full re-selected loadout to the saved state, capturing each card/Joker fresh.
+function PROG.finalize_reward()
 	local st = PROG.state()
-	local rtype = PROG.current_reward_type
-	local kept_label = nil
-	local updated_existing = false
-	if opt then
-		-- Serialize the chosen card/Joker in full now, so all modded state carries over.
-		if opt.card and (rtype == 'card' or rtype == 'joker') then
-			opt.entry.save = PROG.capture_full(opt.card)
-		end
-		if rtype == 'card' then
-			if opt.kept_index and st.cards[opt.kept_index] then
-				st.cards[opt.kept_index] = opt.entry -- re-picked a kept card: update in place
-				updated_existing = true
-			else
-				st.cards[#st.cards + 1] = opt.entry
-			end
-		elseif rtype == 'joker' then
-			if opt.kept_index and st.jokers[opt.kept_index] then
-				st.jokers[opt.kept_index] = opt.entry
-				updated_existing = true
-			else
-				st.jokers[#st.jokers + 1] = opt.entry
-			end
-		elseif rtype == 'voucher' then st.vouchers[#st.vouchers + 1] = opt.entry
-		elseif rtype == 'deck' then st.decks[#st.decks + 1] = opt.entry
-		end
-		kept_label = opt.label
+	local new = { cards = {}, jokers = {}, vouchers = {}, decks = {} }
+	for i in pairs(PROG.sel.card or {}) do
+		local o = PROG.cat_opts.card and PROG.cat_opts.card[i]
+		if o then o.entry.save = PROG.capture_full(o.card); new.cards[#new.cards + 1] = o.entry end
 	end
+	for i in pairs(PROG.sel.joker or {}) do
+		local o = PROG.cat_opts.joker and PROG.cat_opts.joker[i]
+		if o then o.entry.save = PROG.capture_full(o.card); new.jokers[#new.jokers + 1] = o.entry end
+	end
+	for i in pairs(PROG.sel.voucher or {}) do
+		local o = PROG.cat_opts.voucher and PROG.cat_opts.voucher[i]
+		if o then new.vouchers[#new.vouchers + 1] = o.key end
+	end
+	for i in pairs(PROG.sel.deck or {}) do
+		local o = PROG.cat_opts.deck and PROG.cat_opts.deck[i]
+		if o then new.decks[#new.decks + 1] = o.key end
+	end
+	st.cards, st.jokers, st.vouchers, st.decks = new.cards, new.jokers, new.vouchers, new.decks
 	st.run = (G.GAME.prog_run or st.run) + 1
 	G.GAME.prog_reward_claimed = true
 	PROG.save()
 	PROG.refresh_ui_strings()
+	PROG.show_reward_summary()
+end
 
+function PROG.show_reward_summary()
+	local st = PROG.state()
 	local rows = {}
-	local kept_prefix = updated_existing and 'Updated: ' or 'Kept: '
 	rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
-		{ n = G.UIT.T, config = { text = kept_label and (kept_prefix .. kept_label) or 'No reward kept.', scale = 0.5, colour = G.C.GREEN, shadow = true } },
+		{ n = G.UIT.T, config = { text = 'Loadout saved', scale = 0.5, colour = G.C.GREEN, shadow = true } },
+	} }
+	rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.03 }, nodes = {
+		{ n = G.UIT.T, config = { text = string.format('Keeping %d cards, %d Jokers, %d Vouchers, %d deck effects.', #st.cards, #st.jokers, #st.vouchers, #st.decks), scale = 0.35, colour = G.C.WHITE } },
 	} }
 	rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
-		{ n = G.UIT.T, config = { text = 'Next run is level ' .. st.run .. '. Blinds will scale faster.', scale = 0.4, colour = G.C.WHITE } },
+		{ n = G.UIT.T, config = { text = 'Next run is level ' .. st.run .. '. Blinds scale faster.', scale = 0.35, colour = G.C.WHITE } },
 	} }
 	if PROG.in_mp() then
-		-- In a multiplayer match you head back to the lobby to set up the next match.
 		rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
-			{ n = G.UIT.T, config = { text = 'Export your run, then set up the next match.', scale = 0.35, colour = G.C.WHITE } },
+			{ n = G.UIT.T, config = { text = 'Export your run, then set up the next match.', scale = 0.33, colour = G.C.WHITE } },
 		} }
 		rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.08 }, nodes = {
 			UIBox_button({ button = 'prog_export_clipboard', label = { 'Export Progression' }, minw = 4, minh = 0.5, scale = 0.35, colour = G.C.GREEN }),
@@ -766,27 +852,6 @@ function PROG.claim(opt)
 		} }
 	end
 	G.FUNCS.overlay_menu({ definition = create_UIBox_generic_options({ no_back = true, contents = rows }), config = { no_esc = true } })
-end
-
-G.FUNCS.prog_pick = function(e)
-	local id = e and e.config and e.config.id
-	local i = id and tonumber(string.match(tostring(id), '(%d+)$'))
-	local opt = i and PROG.current_opts and PROG.current_opts[i]
-	if opt then PROG.claim(opt) end
-end
-
-G.FUNCS.prog_skip = function()
-	PROG.claim(nil)
-end
-
-G.FUNCS.prog_page_prev = function()
-	PROG.reward_page = PROG.reward_page - 1
-	G.FUNCS.overlay_menu({ definition = PROG.reward_menu_def(), config = { no_esc = true } })
-end
-
-G.FUNCS.prog_page_next = function()
-	PROG.reward_page = PROG.reward_page + 1
-	G.FUNCS.overlay_menu({ definition = PROG.reward_menu_def(), config = { no_esc = true } })
 end
 
 G.FUNCS.prog_next_run = function()
