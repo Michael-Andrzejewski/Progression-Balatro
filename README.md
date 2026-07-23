@@ -56,7 +56,8 @@ Because you re-select every run, a kept item always carries its **current** stat
 - Kept **Jokers** return with their edition (Eternal/Perishable stickers are not carried).
 - Kept **Vouchers** are redeemed for free at the start of every future run.
 - Kept **deck effects** stack. Multiple decks are merged the way the Multiplayer Cocktail Deck does it: numeric bonuses add together, and triggered effects (Anaglyph's tags, Plasma's balancing, etc.) all fire.
-- Blind scaling levels 1 to 3 use the vanilla White/Green/Purple Stake tables. Level 4 and beyond use Steamodded's extended scaling formula, which keeps accelerating (level 4 Ante 8 is roughly 400k, level 5 roughly 900k, and up from there).
+- Blind scaling levels 1 to 3 use the vanilla White/Green/Purple Stake tables. Level 4 and beyond use Steamodded's extended scaling formula, which keeps accelerating.
+- Late antes climb the curve faster than the ante counter: every ante past 5 advances the blind curve by two steps, and every ante past 10 advances it by three. In curve terms ante 6 plays like ante 7, ante 7 like ante 9, and ante 8 like ante 11. Kept rewards are strong, so the back half of each run pushes back. At level 1 the Ante 8 boss asks about 14.4 million; by level 15 it is past 3e11.
 
 ### Mod compatibility
 

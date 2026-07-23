@@ -375,6 +375,7 @@ local back_obj = SMODS.Back({
 		text = {
 			'{C:attention}Win Ante 8{} to keep a reward forever.',
 			'Each run the blinds scale {C:red}one level faster{}.',
+			'Antes past {C:attention}5{} scale {C:red}double{}, past {C:attention}10{} {C:red}triple{}.',
 			'Reward cycle: card, Joker, Voucher, deck effect.',
 		},
 	},
@@ -550,10 +551,32 @@ function Back:change_to(new_back)
 	return change_to_ref(self, new_back)
 end
 
+-- Late antes climb the blind curve faster: each ante past 5 counts as two curve
+-- steps, and each ante past 10 counts as three. Carried-over rewards are strong,
+-- so the back half of a run has to push back harder than vanilla.
+function PROG.effective_ante(ante)
+	if type(ante) ~= 'number' or not PROG.in_run() then return ante end
+	if ante <= 5 then return ante end
+	if ante <= 10 then return 5 + 2 * (ante - 5) end
+	return 15 + 3 * (ante - 10)
+end
+
+-- Installed on the first run start rather than at load, so it wraps the final
+-- get_blind_amount after every other mod (Talisman replaces it outright) is done.
+local function ensure_blind_curve_hook()
+	if PROG.blind_curve_hooked then return end
+	PROG.blind_curve_hooked = true
+	local gba_ref = get_blind_amount
+	function get_blind_amount(ante)
+		return gba_ref(PROG.effective_ante(ante))
+	end
+end
+
 -- Reassert scaling after everything else has applied
 local start_run_ref = Game.start_run
 function Game:start_run(args)
 	PROG.reset_armed = nil
+	ensure_blind_curve_hook()
 	start_run_ref(self, args)
 	if PROG.in_run() then
 		G.GAME.modifiers.scaling = math.max(G.GAME.modifiers.scaling or 1, G.GAME.prog_run or PROG.state().run)
