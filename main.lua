@@ -375,7 +375,7 @@ local back_obj = SMODS.Back({
 		text = {
 			'{C:attention}Win Ante 8{} to keep a reward forever.',
 			'Each run the blinds scale {C:red}one level faster{}.',
-			'Antes past {C:attention}5{} scale {C:red}double{}, past {C:attention}10{} {C:red}triple{}.',
+			'From level {C:attention}6{}, antes {C:attention}4+{} skip {C:red}one blind step{}.',
 			'Reward cycle: card, Joker, Voucher, deck effect.',
 		},
 	},
@@ -551,14 +551,15 @@ function Back:change_to(new_back)
 	return change_to_ref(self, new_back)
 end
 
--- Late antes climb the blind curve faster: each ante past 5 counts as two curve
--- steps, and each ante past 10 counts as three. Carried-over rewards are strong,
--- so the back half of a run has to push back harder than vanilla.
+-- From level 6 on, the run skips one ante's worth of blind curve starting at
+-- ante 4: ante 4 uses ante 5's numbers, ante 5 uses ante 6's, and so on.
+-- Levels 1 to 5 and antes 1 to 3 are untouched, so early runs and the opening
+-- antes of every run stay vanilla.
 function PROG.effective_ante(ante)
 	if type(ante) ~= 'number' or not PROG.in_run() then return ante end
-	if ante <= 5 then return ante end
-	if ante <= 10 then return 5 + 2 * (ante - 5) end
-	return 15 + 3 * (ante - 10)
+	local run = G.GAME.prog_run or PROG.state().run or 1
+	if run <= 5 or ante <= 3 then return ante end
+	return ante + 1
 end
 
 -- Installed on the first run start rather than at load, so it wraps the final
