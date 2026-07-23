@@ -57,7 +57,7 @@ Because you re-select every run, a kept item always carries its **current** stat
 - Kept **Vouchers** are redeemed for free at the start of every future run.
 - Kept **deck effects** stack. Multiple decks are merged the way the Multiplayer Cocktail Deck does it: numeric bonuses add together, and triggered effects (Anaglyph's tags, Plasma's balancing, etc.) all fire.
 - Blind scaling levels 1 to 3 use the vanilla White/Green/Purple Stake tables. Level 4 and beyond use Steamodded's extended scaling formula, which keeps accelerating.
-- From level 6 on, each run skips one ante's worth of blind curve starting at ante 4: ante 4 uses ante 5's numbers, ante 5 uses ante 6's, and so on, with ante 8 landing on the ante 9 (endless formula) value. Levels 1 to 5 and antes 1 to 3 stay vanilla, so early runs and the opening antes are untouched. At level 6 this raises the Ante 8 boss from 3.4M to about 18.4M.
+- From level 6 on, each level adds one skipped step to the blind curve, placed at antes in the cycling order 4, 6, 8, 5, 7, then repeating for second skips. A skip pushes that ante and everything after it one extra step up the curve, so the offsets stack: level 6 has ante 4 play like ante 5, level 7 has ante 6 play like ante 8, level 8 has ante 8 play like ante 11, and by level 15 ante 8 sits at effective ante 18 (an Ante 8 boss around 2.7e34). Levels 1 to 5 and antes 1 to 3 always stay vanilla.
 
 ### Mod compatibility
 

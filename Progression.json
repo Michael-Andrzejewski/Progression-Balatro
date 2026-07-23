@@ -6,7 +6,7 @@
 	"description": "A roguelite deck. Win a run to keep a card, then a Joker, then a Voucher, then a deck effect. Every run the blinds scale one level faster.",
 	"prefix": "prog",
 	"main_file": "main.lua",
-	"version": "0.8.0",
+	"version": "0.9.0",
 	"priority": 0,
 	"badge_colour": "7B4FA8",
 	"dependencies": ["Steamodded (>=1.0.0~BETA-0404a)"]

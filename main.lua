@@ -375,7 +375,7 @@ local back_obj = SMODS.Back({
 		text = {
 			'{C:attention}Win Ante 8{} to keep a reward forever.',
 			'Each run the blinds scale {C:red}one level faster{}.',
-			'From level {C:attention}6{}, antes {C:attention}4+{} skip {C:red}one blind step{}.',
+			'Level {C:attention}6{}+: each level adds a {C:red}skipped blind step{} to antes {C:attention}4+{}.',
 			'Reward cycle: card, Joker, Voucher, deck effect.',
 		},
 	},
@@ -551,15 +551,25 @@ function Back:change_to(new_back)
 	return change_to_ref(self, new_back)
 end
 
--- From level 6 on, the run skips one ante's worth of blind curve starting at
--- ante 4: ante 4 uses ante 5's numbers, ante 5 uses ante 6's, and so on.
--- Levels 1 to 5 and antes 1 to 3 are untouched, so early runs and the opening
--- antes of every run stay vanilla.
+-- From level 6 on, each level adds one skipped step to the blind curve. Skips
+-- are placed at antes in the cycling order 4, 6, 8, 5, 7 (level 6 puts one at
+-- ante 4, level 7 adds one at ante 6, level 8 at ante 8, then ante 5, ante 7,
+-- then the cycle repeats and antes gain second skips). A skip at ante X pushes
+-- every ante from X onward one extra step up the curve, so the offsets stack:
+-- at level 8, ante 8 sits at effective ante 11. Levels 1 to 5 and antes 1 to 3
+-- always stay vanilla.
+local SKIP_ORDER = { 4, 6, 8, 5, 7 }
+
 function PROG.effective_ante(ante)
 	if type(ante) ~= 'number' or not PROG.in_run() then return ante end
 	local run = G.GAME.prog_run or PROG.state().run or 1
-	if run <= 5 or ante <= 3 then return ante end
-	return ante + 1
+	local skips = run - 5
+	if skips <= 0 or ante <= 3 then return ante end
+	local bump = 0
+	for i = 1, skips do
+		if SKIP_ORDER[(i - 1) % #SKIP_ORDER + 1] <= ante then bump = bump + 1 end
+	end
+	return ante + bump
 end
 
 -- Installed on the first run start rather than at load, so it wraps the final
