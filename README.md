@@ -30,15 +30,26 @@ A roguelite meta-progression deck for [Balatro](https://www.playbalatro.com/). B
 2. **Win the run** by beating Ante 8. The reward flow opens automatically on the **You Win** screen.
 3. **Re-select your whole loadout.** You step through cards, then Jokers, then Vouchers, then deck effects, choosing up to the number of each you've unlocked. Your currently-kept items are **pre-checked**, so usually you just confirm; deselect one to drop it, or check a different one to swap. Everything is captured at its **current, leveled-up state** (a Joker's grown sell value, a card's accumulated chips, etc.).
 4. **Start the next run.** Click **Start Run N** and you're dropped into a fresh run with your selected loadout in place, and the blinds now scale one level faster.
-5. **Repeat.** Each win unlocks one more keep-slot and another level of blind scaling. The slot type cycles: card, then Joker, then Voucher, then deck effect, then a 2nd card, and so on forever.
+5. **Repeat.** Each win unlocks more keep-slots and faster blind scaling, according to your carry-over mode (see below).
 
 If you **lose**, nothing is lost. You restart the same run level with the same kept items and can try again.
 
 Your progress saves automatically and survives closing the game.
 
-### Keep-slots by run
+### Carry-over modes
 
-Each win unlocks one more slot, cycling through the four types. You re-select your full loadout every run, so this table shows how many of each you may keep after winning that run:
+A **Mode** control sits on the deck panel (and in the Mods config tab and the multiplayer lobby panel). It sets what a win carries over and how fast the blinds scale. The mode is saved with your progression and travels in the JSON. Both tables show how many of each type you may keep after winning that run; you re-select your full loadout every run either way.
+
+**Full Loadout** (the default): every win adds one keep-slot of *each* type, and the blinds scale four levels per run.
+
+| Run | Blinds scale at | Cards | Jokers | Vouchers | Deck effects |
+|-----|-----------------|-------|--------|----------|--------------|
+| 1 | Level 1 (White Stake pace) | 1 | 1 | 1 | 1 |
+| 2 | Level 5 | 2 | 2 | 2 | 2 |
+| 3 | Level 9 | 3 | 3 | 3 | 3 |
+| ... | +4 levels per run | | | | +1 of each per win |
+
+**Classic**: each win unlocks a single new keep-slot, cycling through the four types, and the blinds scale one level per run.
 
 | Run | Blinds scale at | Cards | Jokers | Vouchers | Deck effects |
 |-----|-----------------|-------|--------|----------|--------------|
@@ -49,6 +60,8 @@ Each win unlocks one more slot, cycling through the four types. You re-select yo
 | 5 | Level 5 | 2 | 1 | 1 | 1 |
 | 6 | Level 6 | 2 | 2 | 1 | 1 |
 | ... | ... | | | | the cycle loops forever |
+
+Saves and JSON exports from before v0.10.0 load as Classic, since that was the only pacing then. Switching modes keeps your run number and reinterprets it under the new rules (the panel shows the resulting blind level next to the run number), so Classic run 5 becomes Full Loadout run 5: five of each, level 17. If that is not what you want, edit `"run"` in your JSON and re-import. A run already in progress keeps the mode it started with; the switch applies from the next run.
 
 Because you re-select every run, a kept item always carries its **current** state forward. There's no "stale copy" problem: if your Blueprint's sell value grew or your King gained chips this run, re-confirming it at the reward screen saves the grown version.
 
@@ -71,7 +84,7 @@ One known edge case: cards carrying [Talisman](https://github.com/SMODS/Talisman
 
 Your progression is stored automatically in the Steamodded config, so it persists across restarts. You can also move a run between machines or set one up by hand:
 
-- **Deck-select screen** (with the Progression Deck viewed): the deck's info panel shows your current run and next reward, with **Import**, **Export**, and **Reset** buttons right below it. You can also **drag a `.json` file onto the game window** from the main menu to import it.
+- **Deck-select screen** (with the Progression Deck viewed): the deck's info panel shows your current run, mode, and next reward, with **Import**, **Export**, **Reset**, and **Mode** controls right below it. You can also **drag a `.json` file onto the game window** from the main menu to import it.
 - **Options menu during a run:** an **Export Progression** button copies your state to the clipboard and writes `progression_export.json` to the Balatro save folder.
 - **Mods menu:** the mod's config page has the same Import / Export / Reset controls.
 
@@ -82,6 +95,7 @@ To resume on another machine, install this mod (plus any content mods your run u
 ```json
 {
   "run": 5,
+  "mode": "full",
   "cards": [
     { "rank": "King", "suit": "Hearts", "enhancement": "m_glass", "edition": "e_foil", "seal": "Red" }
   ],
@@ -93,7 +107,8 @@ To resume on another machine, install this mod (plus any content mods your run u
 }
 ```
 
-- `run` is the run level you'll start at (blinds scale at this level).
+- `run` is the run number you'll start at.
+- `mode` is the carry-over mode: `"full"` (Full Loadout) or `"classic"`. If it's missing, a JSON with any progress loads as Classic and a fresh one as Full Loadout.
 - `rank` and `suit` accept full names (`"King"`, `"Hearts"`) or card keys (`"K"`, `"H"`; 10 is `"T"`).
 - `enhancement`, `edition`, and `seal` are optional. Enhancements use center keys (`m_glass`, `m_steel`, ...), editions use full keys (`e_foil`, `e_holo`, `e_polychrome`, `e_negative`), seals are `Gold`, `Red`, `Blue`, or `Purple`.
 - `jokers` entries can also be plain strings (`"j_blueprint"`).
@@ -107,10 +122,10 @@ You can run a progression series against another player using [BalatroMultiplaye
 A series looks like:
 
 1. Host an **Attrition** lobby (the "4 lives" mode) and turn on **Different Decks** so each player can run their own deck.
-2. Each player chooses the **Progression Deck** in the lobby. A **Progression panel with Import / Export / Comeback buttons sits right on the lobby screen** for both the host and the joiner, so either player can paste in their JSON there. (The full deck panel also appears inside Choose Deck; note the joiner's Choose Deck button only unlocks when the host enables Different Decks.)
+2. Each player chooses the **Progression Deck** in the lobby. A **Progression panel with Import / Export / Mode / Comeback buttons sits right on the lobby screen** for both the host and the joiner, so either player can paste in their JSON there. Agree on the same carry-over mode for a fair series. (The full deck panel also appears inside Choose Deck; note the joiner's Choose Deck button only unlocks when the host enables Different Decks.)
 3. Play the match. Blinds scale by your run level as usual.
 4. When it's decided, **both players re-select their loadout** on their end screen: the winner on the **You Win** screen, the loser on the **Game Over** screen. Then each player **Exports** their updated JSON.
-5. Next match, paste your JSON back in and go again. Rewards accumulate on the normal cycle (card, then Joker, then Voucher, then deck effect), so by the second match you're each carrying a card, by the third a card and a Joker, and so on.
+5. Next match, paste your JSON back in and go again. Rewards accumulate per your carry-over mode: in Full Loadout the second match already has each of you carrying a card, a Joker, a Voucher, and a deck effect; in Classic you build up one keep at a time.
 
 **Comeback bonus.** The match loser can start the next match with extra money. On the deck panel, use the **Comeback start** control to cycle it (`$0 / $25 / $50`), or set `"bonus_dollars": 25` in your JSON. It's applied at the start of every run until you set it back to `$0`, so the loser turns it on for their comeback match and off afterward. (BalatroMultiplayer also has a native "gold on life loss" lobby toggle if you'd rather the game hand out catch-up money automatically.)
 

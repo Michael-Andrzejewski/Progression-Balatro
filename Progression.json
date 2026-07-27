@@ -3,10 +3,10 @@
 	"name": "Progression",
 	"display_name": "Progression",
 	"author": ["Michael"],
-	"description": "A roguelite deck. Win a run to keep a card, then a Joker, then a Voucher, then a deck effect. Every run the blinds scale one level faster.",
+	"description": "A roguelite deck. Win a run to keep rewards forever: one of each type per win in Full Loadout mode, or one new keep per win in Classic mode. Blinds scale faster every run.",
 	"prefix": "prog",
 	"main_file": "main.lua",
-	"version": "0.9.0",
+	"version": "0.10.0",
 	"priority": 0,
 	"badge_colour": "7B4FA8",
 	"dependencies": ["Steamodded (>=1.0.0~BETA-0404a)"]

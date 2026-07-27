@@ -1,7 +1,8 @@
 --- Progression Mod
---- A roguelite deck for Balatro. Each win lets you keep something for all future runs,
---- but every run level makes the blinds scale one level faster.
---- Reward cycle: playing card, Joker, Voucher, deck effect, then it loops.
+--- A roguelite deck for Balatro. Each win lets you keep things for all future runs,
+--- but every run makes the blinds scale faster. Two carry-over modes:
+--- Classic (one new keep per win, cycling card / Joker / Voucher / deck effect,
+--- one blind level per run) and Full Loadout (one of each per win, four levels per run).
 
 local mod = SMODS.current_mod
 
@@ -15,7 +16,8 @@ local PAGE_SIZE = 8
 ----------------------------------------------------------------
 -- Stored in the mod config (persists across runs and game restarts):
 -- state = {
---   run      = 1,   -- current run level (1-based); blinds scale at this level
+--   run      = 1,        -- current run number (1-based)
+--   mode     = 'full',   -- carry-over mode key (see PROG.MODES)
 --   cards    = { {rank='King', suit='Hearts', enhancement='m_glass', edition='e_foil', seal='Red'}, ... },
 --   jokers   = { {key='j_blueprint', edition='e_negative'}, ... },
 --   vouchers = { 'v_overstock_norm', ... },
@@ -23,7 +25,19 @@ local PAGE_SIZE = 8
 -- }
 
 local function default_state()
-	return { run = 1, cards = {}, jokers = {}, vouchers = {}, decks = {}, bonus_dollars = 0 }
+	return { run = 1, mode = 'full', cards = {}, jokers = {}, vouchers = {}, decks = {}, bonus_dollars = 0 }
+end
+
+-- Saves and JSON from before modes existed have no mode field; they were built
+-- under the classic pacing, so any state with progress stays classic. Fresh
+-- states get the new default, Full Loadout.
+local function normalize_mode(st)
+	if st.mode and PROG.MODES[st.mode] then return end
+	if (st.run or 1) > 1 or #st.cards > 0 or #st.jokers > 0 or #st.vouchers > 0 or #st.decks > 0 then
+		st.mode = 'classic'
+	else
+		st.mode = 'full'
+	end
 end
 
 function PROG.state()
@@ -35,6 +49,7 @@ function PROG.state()
 	st.vouchers = st.vouchers or {}
 	st.decks = st.decks or {}
 	st.bonus_dollars = st.bonus_dollars or 0
+	normalize_mode(st)
 	return st
 end
 
@@ -42,30 +57,92 @@ function PROG.save()
 	SMODS.save_mod_config(mod)
 end
 
+-- Reset clears progress but keeps the chosen mode: it is a setting, not progress.
 function PROG.reset()
+	local mode = mod.config.state and mod.config.state.mode
 	mod.config.state = default_state()
+	if mode and PROG.MODES[mode] then mod.config.state.mode = mode end
 	PROG.save()
 end
 
 PROG.REWARD_CYCLE = { 'card', 'joker', 'voucher', 'deck' }
 PROG.REWARD_NAMES = { card = 'playing card', joker = 'Joker', voucher = 'Voucher', deck = 'deck effect' }
 
-function PROG.reward_type(run)
-	run = run or PROG.state().run
-	return PROG.REWARD_CYCLE[(run - 1) % 4 + 1]
+----------------------------------------------------------------
+-- Carry-over modes
+--
+-- Everything a ruleset decides comes down to three questions about a run
+-- number, so each mode answers exactly those:
+--   slots(run)  how many keep-slots of each type winning this run grants
+--   level(run)  the blind-scaling level this run plays at (feeds
+--               G.GAME.modifiers.scaling and the level-6+ blind-step skips)
+--   gain(run)   what the next win promises, for UI text
+-- The mode travels with the state (and its JSON), and each run snapshots it
+-- into G.GAME.prog_mode / prog_level so switching never warps a run underway.
+----------------------------------------------------------------
+
+PROG.MODES = {
+	classic = {
+		label = 'Classic',
+		blurb = 'One new keep per win, cycling card, Joker, Voucher, deck effect. Blinds scale one level per run.',
+		slots = function(run)
+			return {
+				card = math.floor((run + 3) / 4),
+				joker = math.floor((run + 2) / 4),
+				voucher = math.floor((run + 1) / 4),
+				deck = math.floor(run / 4),
+			}
+		end,
+		level = function(run) return run end,
+		gain = function(run) return PROG.REWARD_NAMES[PROG.REWARD_CYCLE[(run - 1) % 4 + 1]] end,
+	},
+	full = {
+		label = 'Full Loadout',
+		blurb = 'Every win adds one card, one Joker, one Voucher, and one deck effect. Blinds scale four levels per run.',
+		slots = function(run)
+			return { card = run, joker = run, voucher = run, deck = run }
+		end,
+		level = function(run) return 4 * (run - 1) + 1 end,
+		gain = function() return 'one of each' end,
+	},
+}
+PROG.MODE_ORDER = { 'classic', 'full' }
+
+-- The saved mode setting (what the next run will use).
+function PROG.mode()
+	return PROG.MODES[PROG.state().mode] or PROG.MODES.full
+end
+
+-- The mode a question about the current run should be answered with: the run's
+-- own snapshot while one is underway, the saved setting otherwise.
+function PROG.active_mode()
+	if PROG.in_run() and G.GAME.prog_mode and PROG.MODES[G.GAME.prog_mode] then
+		return PROG.MODES[G.GAME.prog_mode]
+	end
+	return PROG.mode()
+end
+
+function PROG.scaling_level(run)
+	run = run or (G.GAME and G.GAME.prog_run) or PROG.state().run
+	return PROG.active_mode().level(run)
 end
 
 -- Live UI strings (referenced by ref_table text nodes so they update in place)
-PROG.ui = { summary = '', next = '', note = '', run_line = '', next_short = '', kept_line = '', comeback = '' }
+PROG.ui = { summary = '', next = '', note = '', run_line = '', next_short = '', kept_line = '', comeback = '', mode_line = '', mode_blurb = '' }
 
 function PROG.refresh_ui_strings()
 	local st = PROG.state()
-	PROG.ui.summary = string.format('Run %d. Kept: %d cards, %d Jokers, %d Vouchers, %d deck effects.',
-		st.run, #st.cards, #st.jokers, #st.vouchers, #st.decks)
-	PROG.ui.next = 'Next reward on win: ' .. PROG.REWARD_NAMES[PROG.reward_type()]
+	local mode = PROG.mode()
+	local level = mode.level(st.run)
+	PROG.ui.summary = string.format('Run %d, blinds level %d. Kept: %d cards, %d Jokers, %d Vouchers, %d deck effects.',
+		st.run, level, #st.cards, #st.jokers, #st.vouchers, #st.decks)
+	PROG.ui.next = 'Next reward on win: ' .. mode.gain(st.run)
+	PROG.ui.mode_line = 'Mode: ' .. mode.label
+	PROG.ui.mode_blurb = mode.blurb
 	-- Compact variants for the narrow deck-select panel
-	PROG.ui.run_line = 'Run ' .. st.run
-	PROG.ui.next_short = 'Next win: ' .. PROG.REWARD_NAMES[PROG.reward_type()]
+	PROG.ui.run_line = (level == st.run) and ('Run ' .. st.run)
+		or string.format('Run %d (level %d)', st.run, level)
+	PROG.ui.next_short = 'Next win: ' .. mode.gain(st.run)
 	PROG.ui.kept_line = string.format('Kept: %dc %dj %dv %dd', #st.cards, #st.jokers, #st.vouchers, #st.decks)
 	PROG.ui.comeback = 'Comeback start: $' .. (st.bonus_dollars or 0)
 end
@@ -288,6 +365,7 @@ function PROG.export_json()
 	local st = PROG.state()
 	return JSON.encode({
 		run = st.run,
+		mode = st.mode,
 		cards = st.cards,
 		jokers = st.jokers,
 		vouchers = st.vouchers,
@@ -302,6 +380,7 @@ function PROG.import_json(str)
 	if not ok or type(data) ~= 'table' then return false, 'Import failed. That is not valid JSON.' end
 	local st = default_state()
 	if type(data.run) == 'number' and data.run >= 1 then st.run = math.floor(data.run) end
+	st.mode = (type(data.mode) == 'string' and PROG.MODES[data.mode]) and data.mode or nil
 	if type(data.bonus_dollars) == 'number' then st.bonus_dollars = math.floor(data.bonus_dollars) end
 	if type(data.cards) == 'table' then
 		for _, c in ipairs(data.cards) do
@@ -350,11 +429,12 @@ function PROG.import_json(str)
 			if type(d) == 'string' then st.decks[#st.decks + 1] = d end
 		end
 	end
+	normalize_mode(st)
 	mod.config.state = st
 	PROG.save()
 	PROG.refresh_ui_strings()
-	return true, string.format('Imported: run %d, %dc %dj %dv %dd.',
-		st.run, #st.cards, #st.jokers, #st.vouchers, #st.decks)
+	return true, string.format('Imported: run %d, %dc %dj %dv %dd, %s.',
+		st.run, #st.cards, #st.jokers, #st.vouchers, #st.decks, PROG.MODES[st.mode].label)
 end
 
 ----------------------------------------------------------------
@@ -373,10 +453,12 @@ local back_obj = SMODS.Back({
 	loc_txt = {
 		name = 'Progression Deck',
 		text = {
-			'{C:attention}Win Ante 8{} to keep a reward forever.',
-			'Each run the blinds scale {C:red}one level faster{}.',
+			'{C:attention}Win Ante 8{} to keep rewards forever.',
+			'Full Loadout mode: one of {C:attention}each{} type per win,',
+			'blinds scale {C:red}four levels{} per run.',
+			'Classic mode: {C:attention}one{} new keep per win (cycling),',
+			'blinds scale {C:red}one level{} per run.',
 			'Level {C:attention}6{}+: each level adds a {C:red}skipped blind step{} to antes {C:attention}4+{}.',
-			'Reward cycle: card, Joker, Voucher, deck effect.',
 		},
 	},
 	apply = function(self, back)
@@ -384,11 +466,15 @@ local back_obj = SMODS.Back({
 		local st = PROG.state()
 		local run = st.run or 1
 		G.GAME.prog_run = run
+		G.GAME.prog_mode = st.mode
+		G.GAME.prog_level = PROG.scaling_level(run)
 		G.GAME.prog_reward_claimed = false
 
 		-- Blind scaling: level 1 to 3 are the vanilla White/Green/Purple stake tables,
 		-- level 4 and up use the Steamodded extended scaling formula automatically.
-		G.GAME.modifiers.scaling = math.max(G.GAME.modifiers.scaling or 1, run)
+		-- The level comes from the mode: Classic plays run N at level N, Full Loadout
+		-- at level 4(N-1)+1.
+		G.GAME.modifiers.scaling = math.max(G.GAME.modifiers.scaling or 1, G.GAME.prog_level)
 
 		-- Kept deck effects, merged Cocktail-style
 		G.GAME.prog_decks = {}
@@ -562,8 +648,10 @@ local SKIP_ORDER = { 4, 6, 8, 5, 7 }
 
 function PROG.effective_ante(ante)
 	if type(ante) ~= 'number' or not PROG.in_run() then return ante end
-	local run = G.GAME.prog_run or PROG.state().run or 1
-	local skips = run - 5
+	-- prog_level is snapshotted at run start; pre-mode run saves only carry
+	-- prog_run, which equalled the level under the classic pacing.
+	local level = G.GAME.prog_level or G.GAME.prog_run or PROG.scaling_level()
+	local skips = level - 5
 	if skips <= 0 or ante <= 3 then return ante end
 	local bump = 0
 	for i = 1, skips do
@@ -590,7 +678,8 @@ function Game:start_run(args)
 	ensure_blind_curve_hook()
 	start_run_ref(self, args)
 	if PROG.in_run() then
-		G.GAME.modifiers.scaling = math.max(G.GAME.modifiers.scaling or 1, G.GAME.prog_run or PROG.state().run)
+		G.GAME.modifiers.scaling = math.max(G.GAME.modifiers.scaling or 1,
+			G.GAME.prog_level or G.GAME.prog_run or PROG.scaling_level())
 	end
 end
 
@@ -640,20 +729,15 @@ function create_UIBox_game_over()
 	return ret
 end
 
--- How many of each type you may keep after winning `run`. Each win unlocks one more
--- slot, cycling card -> Joker -> Voucher -> deck effect. You re-select your whole
--- loadout every run, so kept items are always re-captured at their current state.
+-- How many of each type you may keep after winning `run`, per the active mode.
+-- You re-select your whole loadout every run, so kept items are always
+-- re-captured at their current state.
 PROG.CATS = { 'card', 'joker', 'voucher', 'deck' }
 PROG.CAT_PLURAL = { card = 'cards', joker = 'Jokers', voucher = 'Vouchers', deck = 'deck effects' }
 
 function PROG.slot_counts(run)
 	run = run or (G.GAME and G.GAME.prog_run) or PROG.state().run
-	return {
-		card = math.floor((run + 3) / 4),
-		joker = math.floor((run + 2) / 4),
-		voucher = math.floor((run + 1) / 4),
-		deck = math.floor(run / 4),
-	}
+	return PROG.active_mode().slots(run)
 end
 
 -- The selectable items in the current run for one category, with `preselect` set on the
@@ -875,7 +959,7 @@ function PROG.show_reward_summary()
 		{ n = G.UIT.T, config = { text = string.format('Keeping %d cards, %d Jokers, %d Vouchers, %d deck effects.', #st.cards, #st.jokers, #st.vouchers, #st.decks), scale = 0.35, colour = G.C.WHITE } },
 	} }
 	rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
-		{ n = G.UIT.T, config = { text = 'Next run is level ' .. st.run .. '. Blinds scale faster.', scale = 0.35, colour = G.C.WHITE } },
+		{ n = G.UIT.T, config = { text = string.format('Run %d is next. Blinds scale at level %d.', st.run, PROG.mode().level(st.run)), scale = 0.35, colour = G.C.WHITE } },
 	} }
 	if PROG.in_mp() then
 		rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
@@ -942,6 +1026,11 @@ function PROG.deck_controls_nodes()
 			btn('prog_reset', 'Reset', G.C.RED),
 		} },
 		{ n = G.UIT.R, config = { align = 'cm', padding = 0.03 }, nodes = {
+			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'mode_line', scale = 0.26, colour = G.C.UI.TEXT_DARK } },
+			{ n = G.UIT.T, config = { text = '  ', scale = 0.26, colour = G.C.CLEAR } },
+			UIBox_button({ button = 'prog_cycle_mode', label = { 'change' }, colour = G.C.PURPLE, minw = 1.2, minh = 0.4, scale = 0.26, col = true }),
+		} },
+		{ n = G.UIT.R, config = { align = 'cm', padding = 0.03 }, nodes = {
 			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'comeback', scale = 0.26, colour = G.C.UI.TEXT_DARK } },
 			{ n = G.UIT.T, config = { text = '  ', scale = 0.26, colour = G.C.CLEAR } },
 			UIBox_button({ button = 'prog_cycle_comeback', label = { 'change' }, colour = G.C.ORANGE, minw = 1.2, minh = 0.4, scale = 0.26, col = true }),
@@ -950,6 +1039,19 @@ function PROG.deck_controls_nodes()
 			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'note', scale = 0.24, colour = G.C.UI.TEXT_DARK } },
 		} },
 	}
+end
+
+-- Cycle the carry-over mode. Takes effect from the next run; one already
+-- underway keeps the mode it started with (snapshotted in apply).
+G.FUNCS.prog_cycle_mode = function()
+	local st = PROG.state()
+	local idx = 1
+	for i, k in ipairs(PROG.MODE_ORDER) do if k == st.mode then idx = i end end
+	st.mode = PROG.MODE_ORDER[(idx % #PROG.MODE_ORDER) + 1]
+	PROG.save()
+	PROG.refresh_ui_strings()
+	PROG.ui.note = 'Mode set to ' .. PROG.mode().label .. '.'
+	play_sound('button', 1, 0.4)
 end
 
 -- The comeback bonus (extra starting dollars, e.g. for the match loser) cycles 0/25/50.
@@ -1035,7 +1137,11 @@ function PROG.lobby_panel_def()
 		{ n = G.UIT.R, config = { align = 'cm', padding = 0.04 }, nodes = {
 			btn('prog_import_clipboard', 'Import', G.C.BLUE),
 			btn('prog_export_clipboard', 'Export', G.C.GREEN),
+			btn('prog_cycle_mode', 'Mode', G.C.PURPLE, 1.1),
 			btn('prog_cycle_comeback', 'Comeback $', G.C.ORANGE, 1.7),
+		} },
+		{ n = G.UIT.R, config = { align = 'cm', padding = 0.02 }, nodes = {
+			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'mode_line', scale = 0.26, colour = G.C.UI.TEXT_LIGHT } },
 		} },
 		{ n = G.UIT.R, config = { align = 'cm', padding = 0.02 }, nodes = {
 			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'comeback', scale = 0.26, colour = G.C.UI.TEXT_LIGHT } },
@@ -1120,6 +1226,14 @@ mod.config_tab = function()
 		} },
 		{ n = G.UIT.R, config = { align = 'cm', padding = 0.03 }, nodes = {
 			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'next', scale = 0.35, colour = G.C.WHITE } },
+		} },
+		{ n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
+			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'mode_line', scale = 0.35, colour = G.C.WHITE } },
+			{ n = G.UIT.T, config = { text = '  ', scale = 0.35, colour = G.C.CLEAR } },
+			UIBox_button({ button = 'prog_cycle_mode', label = { 'Switch Mode' }, colour = G.C.PURPLE, minw = 2.2, minh = 0.45, scale = 0.28, col = true }),
+		} },
+		{ n = G.UIT.R, config = { align = 'cm', padding = 0.03 }, nodes = {
+			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'mode_blurb', scale = 0.26, colour = G.C.UI.TEXT_INACTIVE } },
 		} },
 		{ n = G.UIT.R, config = { align = 'cm', padding = 0.08 }, nodes = {
 			UIBox_button({ button = 'prog_import_clipboard', label = { 'Import from Clipboard' }, colour = G.C.BLUE, minw = 2.8, minh = 0.5, scale = 0.3, col = true }),
