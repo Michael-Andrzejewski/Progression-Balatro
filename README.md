@@ -38,7 +38,7 @@ Your progress saves automatically and survives closing the game.
 
 ### Carry-over modes
 
-A **Mode** control sits on the deck panel (and in the Mods config tab and the multiplayer lobby panel). It sets what a win carries over and how fast the blinds scale. The mode is saved with your progression and travels in the JSON. Both tables show how many of each type you may keep after winning that run; you re-select your full loadout every run either way.
+A **Mode** control sits on the deck panel (and in the Mods config tab and the multiplayer lobby panel). It sets what a win carries over and how fast the blinds scale. The mode is saved with your progression and travels in the JSON. The tables show how many of each type you may keep after winning that run; you re-select your full loadout every run either way.
 
 **Full Loadout** (the default): every win adds one keep-slot of *each* type, and the blinds scale four levels per run.
 
@@ -48,6 +48,19 @@ A **Mode** control sits on the deck panel (and in the Mods config tab and the mu
 | 2 | Level 5 | 2 | 2 | 2 | 2 |
 | 3 | Level 9 | 3 | 3 | 3 | 3 |
 | ... | +4 levels per run | | | | +1 of each per win |
+
+**Versus**: rules for a head-to-head series (see the Multiplayer section for the series flow). Every win adds one keep-slot of each type like Full Loadout, but the blind level doubles after the second run, and the deck-effect rewards for the first three rounds come from fixed pools.
+
+| Run | Blinds scale at | Keeps | Deck-effect reward pool |
+|-----|-----------------|-------|-------------------------|
+| 1 | Level 1 | 1 of each | Red, Blue, Green, Yellow, Magic |
+| 2 | Level 5 | 2 of each | + Ghost, Black, Painted, Anaglyph, Abandoned |
+| 3 | Level 10 | 3 of each | + Plasma, Heidelberg, Echo, Fabled |
+| 4 | Level 20 | 4 of each | every deck |
+| 5 | Level 40 | 5 of each | every deck |
+| ... | doubles each run | +1 of each per win | every deck |
+
+The pools are cumulative, so a deck effect you kept earlier can always be re-selected. Heidelberg and Echo come from BalatroMultiplayer and Fabled from All in Jest; if one of those mods is missing, that entry simply doesn't appear.
 
 **Classic**: each win unlocks a single new keep-slot, cycling through the four types, and the blinds scale one level per run.
 
@@ -108,7 +121,9 @@ To resume on another machine, install this mod (plus any content mods your run u
 ```
 
 - `run` is the run number you'll start at.
-- `mode` is the carry-over mode: `"full"` (Full Loadout) or `"classic"`. If it's missing, a JSON with any progress loads as Classic and a fresh one as Full Loadout.
+- `mode` is the carry-over mode: `"full"` (Full Loadout), `"classic"`, or `"versus"`. If it's missing, a JSON with any progress loads as Classic and a fresh one as Full Loadout.
+- `bonus_dollars` (optional) is the comeback bonus, extra starting money each run.
+- `meta_lives` (optional, 1 to 4) is your remaining meta-lives in a Versus series.
 - `rank` and `suit` accept full names (`"King"`, `"Hearts"`) or card keys (`"K"`, `"H"`; 10 is `"T"`).
 - `enhancement`, `edition`, and `seal` are optional. Enhancements use center keys (`m_glass`, `m_steel`, ...), editions use full keys (`e_foil`, `e_holo`, `e_polychrome`, `e_negative`), seals are `Gold`, `Red`, `Blue`, or `Purple`.
 - `jokers` entries can also be plain strings (`"j_blueprint"`).
@@ -127,7 +142,9 @@ A series looks like:
 4. When it's decided, **both players re-select their loadout** on their end screen: the winner on the **You Win** screen, the loser on the **Game Over** screen. Then each player **Exports** their updated JSON.
 5. Next match, paste your JSON back in and go again. Rewards accumulate per your carry-over mode: in Full Loadout the second match already has each of you carrying a card, a Joker, a Voucher, and a deck effect; in Classic you build up one keep at a time.
 
-**Comeback bonus.** The match loser can start the next match with extra money. On the deck panel, use the **Comeback start** control to cycle it (`$0 / $25 / $50`), or set `"bonus_dollars": 25` in your JSON. It's applied at the start of every run until you set it back to `$0`, so the loser turns it on for their comeback match and off afterward. (BalatroMultiplayer also has a native "gold on life loss" lobby toggle if you'd rather the game hand out catch-up money automatically.)
+**Meta-lives and series play.** Each player has **4 meta-lives**, shown on the deck panel and the lobby panel. Losing a multiplayer match (running out of in-match lives) costs one meta-life automatically. When a player loses their fourth, the **series is over**: that player's comeback money goes up by **$25** and their meta-lives refill to 4 for the next series. Both players then import their stats as usual and start the next series. Because nothing is synced between clients, the series **winner** refreshes their own side by hand: click the **Lives** control to cycle back to 4 (it counts down and wraps, `4 / 3 / 2 / 1 / 4`), and if you had comeback money from losing a previous series, cycle **Comeback $** back to `$0`. The Lives control also fixes the count if a disconnect or crash miscounted a match.
+
+**Comeback bonus.** The match loser can start the next match with extra money. On the deck panel, use the **Comeback start** control to cycle it in $25 steps up to $100, or set `"bonus_dollars": 25` in your JSON. It's applied at the start of every run until you set it back to `$0`. Series losses add $25 to it automatically (see meta-lives above). (BalatroMultiplayer also has a native "gold on life loss" lobby toggle if you'd rather the game hand out catch-up money automatically.)
 
 This is new and hasn't been battle-tested across two clients yet — if the deck desyncs in a match or the scaling doesn't take, let me know and it can be adjusted.
 

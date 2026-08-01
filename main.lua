@@ -25,7 +25,7 @@ local PAGE_SIZE = 8
 -- }
 
 local function default_state()
-	return { run = 1, mode = 'full', cards = {}, jokers = {}, vouchers = {}, decks = {}, bonus_dollars = 0 }
+	return { run = 1, mode = 'full', cards = {}, jokers = {}, vouchers = {}, decks = {}, bonus_dollars = 0, meta_lives = 4 }
 end
 
 -- Saves and JSON from before modes existed have no mode field; they were built
@@ -49,6 +49,7 @@ function PROG.state()
 	st.vouchers = st.vouchers or {}
 	st.decks = st.decks or {}
 	st.bonus_dollars = st.bonus_dollars or 0
+	st.meta_lives = st.meta_lives or 4
 	normalize_mode(st)
 	return st
 end
@@ -77,9 +78,28 @@ PROG.REWARD_NAMES = { card = 'playing card', joker = 'Joker', voucher = 'Voucher
 --   level(run)  the blind-scaling level this run plays at (feeds
 --               G.GAME.modifiers.scaling and the level-6+ blind-step skips)
 --   gain(run)   what the next win promises, for UI text
+-- A mode may also define deck_pool(run): the set of deck-effect keys offered
+-- at that run's reward (nil = every deck).
 -- The mode travels with the state (and its JSON), and each run snapshots it
 -- into G.GAME.prog_mode / prog_level so switching never warps a run underway.
 ----------------------------------------------------------------
+
+-- Versus deck-effect tiers, cumulative: round 1 offers tier 1, round 2 adds
+-- tier 2, round 3 adds tier 3, round 4 on offers everything.
+PROG.VERSUS_DECK_TIERS = {
+	{ 'b_red', 'b_blue', 'b_green', 'b_yellow', 'b_magic' },
+	{ 'b_ghost', 'b_black', 'b_painted', 'b_anaglyph', 'b_abandoned' },
+	{ 'b_plasma', 'b_mp_heidelberg', 'b_mp_echodeck', 'b_aij_fabled' },
+}
+
+function PROG.versus_deck_pool(run)
+	if run >= 4 then return nil end
+	local pool = {}
+	for tier = 1, math.min(run, #PROG.VERSUS_DECK_TIERS) do
+		for _, k in ipairs(PROG.VERSUS_DECK_TIERS[tier]) do pool[k] = true end
+	end
+	return pool
+end
 
 PROG.MODES = {
 	classic = {
@@ -105,8 +125,21 @@ PROG.MODES = {
 		level = function(run) return 4 * (run - 1) + 1 end,
 		gain = function() return 'one of each' end,
 	},
+	versus = {
+		label = 'Versus',
+		blurb = 'Head-to-head series rules. Every win adds one keep of each type. Blind levels double: 1, 5, 10, 20, 40. Early deck rewards come from limited pools.',
+		slots = function(run)
+			return { card = run, joker = run, voucher = run, deck = run }
+		end,
+		level = function(run)
+			if run <= 1 then return 1 end
+			return 5 * 2 ^ (run - 2)
+		end,
+		gain = function() return 'one of each' end,
+		deck_pool = function(run) return PROG.versus_deck_pool(run) end,
+	},
 }
-PROG.MODE_ORDER = { 'classic', 'full' }
+PROG.MODE_ORDER = { 'classic', 'full', 'versus' }
 
 -- The saved mode setting (what the next run will use).
 function PROG.mode()
@@ -128,7 +161,7 @@ function PROG.scaling_level(run)
 end
 
 -- Live UI strings (referenced by ref_table text nodes so they update in place)
-PROG.ui = { summary = '', next = '', note = '', run_line = '', next_short = '', kept_line = '', comeback = '', mode_line = '', mode_blurb = '' }
+PROG.ui = { summary = '', next = '', note = '', run_line = '', next_short = '', kept_line = '', comeback = '', mode_line = '', mode_blurb = '', lives = '' }
 
 function PROG.refresh_ui_strings()
 	local st = PROG.state()
@@ -145,6 +178,7 @@ function PROG.refresh_ui_strings()
 	PROG.ui.next_short = 'Next win: ' .. mode.gain(st.run)
 	PROG.ui.kept_line = string.format('Kept: %dc %dj %dv %dd', #st.cards, #st.jokers, #st.vouchers, #st.decks)
 	PROG.ui.comeback = 'Comeback start: $' .. (st.bonus_dollars or 0)
+	PROG.ui.lives = 'Meta-lives: ' .. (st.meta_lives or 4) .. '/4'
 end
 
 ----------------------------------------------------------------
@@ -371,6 +405,7 @@ function PROG.export_json()
 		vouchers = st.vouchers,
 		decks = st.decks,
 		bonus_dollars = st.bonus_dollars,
+		meta_lives = st.meta_lives,
 	})
 end
 
@@ -382,6 +417,7 @@ function PROG.import_json(str)
 	if type(data.run) == 'number' and data.run >= 1 then st.run = math.floor(data.run) end
 	st.mode = (type(data.mode) == 'string' and PROG.MODES[data.mode]) and data.mode or nil
 	if type(data.bonus_dollars) == 'number' then st.bonus_dollars = math.floor(data.bonus_dollars) end
+	if type(data.meta_lives) == 'number' then st.meta_lives = math.max(1, math.min(4, math.floor(data.meta_lives))) end
 	if type(data.cards) == 'table' then
 		for _, c in ipairs(data.cards) do
 			-- Accept a card that has a full save blob, or friendly rank+suit fields.
@@ -458,6 +494,7 @@ local back_obj = SMODS.Back({
 			'blinds scale {C:red}four levels{} per run.',
 			'Classic mode: {C:attention}one{} new keep per win (cycling),',
 			'blinds scale {C:red}one level{} per run.',
+			'Versus mode: one of each per win, blind levels {C:red}double{} each run.',
 			'Level {C:attention}6{}+: each level adds a {C:red}skipped blind step{} to antes {C:attention}4+{}.',
 		},
 	},
@@ -717,14 +754,36 @@ function win_game()
 	end
 end
 
+-- A multiplayer match loss costs one meta-life. Losing the fourth ends the
+-- series: the loser's comeback money goes up $25 and their lives refill to 4
+-- for the next series. The series winner refills their own lives (and the
+-- previous loser retires their comeback money) with the panel controls, since
+-- nothing is synced between the two clients.
+function PROG.on_match_loss()
+	if G.GAME.prog_meta_life_lost then return end
+	G.GAME.prog_meta_life_lost = true
+	local st = PROG.state()
+	st.meta_lives = math.max(0, (st.meta_lives or 4) - 1)
+	if st.meta_lives == 0 then
+		st.bonus_dollars = (st.bonus_dollars or 0) + 25
+		st.meta_lives = 4
+		G.GAME.prog_series_lost = true
+	end
+	PROG.save()
+	PROG.refresh_ui_strings()
+end
+
 -- Game-over screen. In a multiplayer match the loser never triggers win_game, so this
 -- is where the losing player gets to pick their carry-forward reward. (In single-player
 -- a loss just means you retry the same run level, so no reward there.)
 local cubgo_ref = create_UIBox_game_over
 function create_UIBox_game_over()
 	local ret = cubgo_ref()
-	if PROG.in_mp() and PROG.reward_pending() then
-		PROG.open_reward_on_end_screen()
+	if PROG.in_mp() and PROG.in_run() then
+		PROG.on_match_loss()
+		if PROG.reward_pending() then
+			PROG.open_reward_on_end_screen()
+		end
 	end
 	return ret
 end
@@ -786,8 +845,13 @@ function PROG.category_options(cat)
 			b_challenge = true, b_mp_cocktail = true, b_cry_antimatter = true,
 			b_akyrs_hardcore_challenges = true, [PROG.DECK_KEY] = true,
 		}
+		-- Versus limits the early deck rewards to fixed pools; pool is nil once
+		-- every deck is unlocked (round 4 on) or in the other modes.
+		local mode = PROG.active_mode()
+		local pool = mode.deck_pool and mode.deck_pool((G.GAME and G.GAME.prog_run) or PROG.state().run) or nil
 		for _, center in ipairs(G.P_CENTER_POOLS.Back or {}) do
-			if center.unlocked and not center.omit and not excluded[center.key] then
+			if center.unlocked and not center.omit and not excluded[center.key]
+				and (not pool or pool[center.key]) then
 				opts[#opts + 1] = { label = center_name(center.key, 'Back'), key = center.key, preselect = keptset[center.key] and true or false }
 			end
 		end
@@ -962,6 +1026,15 @@ function PROG.show_reward_summary()
 		{ n = G.UIT.T, config = { text = string.format('Run %d is next. Blinds scale at level %d.', st.run, PROG.mode().level(st.run)), scale = 0.35, colour = G.C.WHITE } },
 	} }
 	if PROG.in_mp() then
+		if G.GAME.prog_series_lost then
+			rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
+				{ n = G.UIT.T, config = { text = string.format('Series lost. Comeback money is now $%d and meta-lives refill to 4.', st.bonus_dollars or 0), scale = 0.33, colour = G.C.RED } },
+			} }
+		else
+			rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
+				{ n = G.UIT.T, config = { text = string.format('Meta-lives: %d/4', st.meta_lives or 4), scale = 0.33, colour = G.C.WHITE } },
+			} }
+		end
 		rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
 			{ n = G.UIT.T, config = { text = 'Export your run, then set up the next match.', scale = 0.33, colour = G.C.WHITE } },
 		} }
@@ -1035,6 +1108,11 @@ function PROG.deck_controls_nodes()
 			{ n = G.UIT.T, config = { text = '  ', scale = 0.26, colour = G.C.CLEAR } },
 			UIBox_button({ button = 'prog_cycle_comeback', label = { 'change' }, colour = G.C.ORANGE, minw = 1.2, minh = 0.4, scale = 0.26, col = true }),
 		} },
+		{ n = G.UIT.R, config = { align = 'cm', padding = 0.03 }, nodes = {
+			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'lives', scale = 0.26, colour = G.C.UI.TEXT_DARK } },
+			{ n = G.UIT.T, config = { text = '  ', scale = 0.26, colour = G.C.CLEAR } },
+			UIBox_button({ button = 'prog_cycle_lives', label = { 'change' }, colour = G.C.RED, minw = 1.2, minh = 0.4, scale = 0.26, col = true }),
+		} },
 		{ n = G.UIT.R, config = { align = 'cm', padding = 0.02 }, nodes = {
 			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'note', scale = 0.24, colour = G.C.UI.TEXT_DARK } },
 		} },
@@ -1054,8 +1132,22 @@ G.FUNCS.prog_cycle_mode = function()
 	play_sound('button', 1, 0.4)
 end
 
--- The comeback bonus (extra starting dollars, e.g. for the match loser) cycles 0/25/50.
-PROG.COMEBACK_STEPS = { 0, 25, 50 }
+-- Manual meta-lives control (for the series winner refilling, or fixing a
+-- missed count). Clicking counts down and wraps: 4, 3, 2, 1, back to 4.
+G.FUNCS.prog_cycle_lives = function()
+	local st = PROG.state()
+	local lives = (st.meta_lives or 4) - 1
+	if lives < 1 then lives = 4 end
+	st.meta_lives = lives
+	PROG.save()
+	PROG.refresh_ui_strings()
+	PROG.ui.note = 'Meta-lives set to ' .. lives .. '.'
+	play_sound('button', 1, 0.4)
+end
+
+-- The comeback bonus (extra starting dollars, e.g. for the match loser) cycles
+-- in $25 steps; series losses can stack it past the top, so the wrap goes back to $0.
+PROG.COMEBACK_STEPS = { 0, 25, 50, 75, 100 }
 
 G.FUNCS.prog_cycle_comeback = function()
 	local st = PROG.state()
@@ -1139,9 +1231,12 @@ function PROG.lobby_panel_def()
 			btn('prog_export_clipboard', 'Export', G.C.GREEN),
 			btn('prog_cycle_mode', 'Mode', G.C.PURPLE, 1.1),
 			btn('prog_cycle_comeback', 'Comeback $', G.C.ORANGE, 1.7),
+			btn('prog_cycle_lives', 'Lives', G.C.RED, 1.0),
 		} },
 		{ n = G.UIT.R, config = { align = 'cm', padding = 0.02 }, nodes = {
 			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'mode_line', scale = 0.26, colour = G.C.UI.TEXT_LIGHT } },
+			{ n = G.UIT.T, config = { text = '   ', scale = 0.26, colour = G.C.CLEAR } },
+			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'lives', scale = 0.26, colour = G.C.UI.TEXT_LIGHT } },
 		} },
 		{ n = G.UIT.R, config = { align = 'cm', padding = 0.02 }, nodes = {
 			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'comeback', scale = 0.26, colour = G.C.UI.TEXT_LIGHT } },
