@@ -776,6 +776,12 @@ end
 -- Game-over screen. In a multiplayer match the loser never triggers win_game, so this
 -- is where the losing player gets to pick their carry-forward reward. (In single-player
 -- a loss just means you retry the same run level, so no reward there.)
+--
+-- NOTE: inside a Multiplayer lobby this vanilla hook is dead code. Multiplayer
+-- loads at priority 10000000, so its own create_UIBox_game_over wrapper sits
+-- outside ours, and in a lobby it builds MP.UI.create_UIBox_mp_game_end(false)
+-- without calling inward. The loser is caught by the MP end-screen hook below
+-- instead; this stays for MP versions that do not override the end screens.
 local cubgo_ref = create_UIBox_game_over
 function create_UIBox_game_over()
 	local ret = cubgo_ref()
@@ -787,6 +793,29 @@ function create_UIBox_game_over()
 	end
 	return ret
 end
+
+-- The Multiplayer end screen (the Your Nemesis one). Built with won = false for
+-- the match loser: that is the loser's only end screen in a lobby, so the
+-- meta-life loss and the reward picker hang off it. Winners are already handled
+-- by the win_game hook, which MP does call inward. Installed lazily from
+-- Game:main_menu because MP loads after us.
+local function install_mp_end_screen_hook()
+	if PROG.mp_end_hooked then return end
+	if not (MP and MP.UI and MP.UI.create_UIBox_mp_game_end) then return end
+	PROG.mp_end_hooked = true
+	local end_ref = MP.UI.create_UIBox_mp_game_end
+	MP.UI.create_UIBox_mp_game_end = function(won, ...)
+		local ret = end_ref(won, ...)
+		if not won and PROG.in_mp() and PROG.in_run() then
+			PROG.on_match_loss()
+			if PROG.reward_pending() then
+				PROG.open_reward_on_end_screen()
+			end
+		end
+		return ret
+	end
+end
+PROG.install_mp_end_screen_hook = install_mp_end_screen_hook
 
 -- How many of each type you may keep after winning `run`, per the active mode.
 -- You re-select your whole loadout every run, so kept items are always
@@ -1042,7 +1071,7 @@ function PROG.show_reward_summary()
 			UIBox_button({ button = 'prog_export_clipboard', label = { 'Export Progression' }, minw = 4, minh = 0.5, scale = 0.35, colour = G.C.GREEN }),
 		} }
 		rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
-			UIBox_button({ button = 'go_to_menu', label = { 'Return to Lobby / Menu' }, minw = 4, minh = 0.5, scale = 0.35, colour = G.C.RED }),
+			UIBox_button({ button = 'prog_return_lobby', label = { 'Return to Lobby / Menu' }, minw = 4, minh = 0.5, scale = 0.35, colour = G.C.RED }),
 		} }
 	else
 		rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.08 }, nodes = {
@@ -1066,6 +1095,15 @@ end
 
 G.FUNCS.prog_close = function()
 	G.FUNCS.exit_overlay_menu()
+end
+
+-- Use the Multiplayer mod's own return-to-lobby flow when we replaced its end
+-- screen, so the lobby state stays intact; plain menu otherwise.
+G.FUNCS.prog_return_lobby = function(e)
+	if PROG.in_mp() and G.FUNCS.mp_return_to_lobby then
+		return G.FUNCS.mp_return_to_lobby(e)
+	end
+	return G.FUNCS.go_to_menu(e)
 end
 
 ----------------------------------------------------------------
@@ -1266,6 +1304,7 @@ end
 local main_menu_ref = Game.main_menu
 function Game:main_menu(...)
 	install_mp_lobby_panel()
+	PROG.install_mp_end_screen_hook()
 	return main_menu_ref(self, ...)
 end
 
