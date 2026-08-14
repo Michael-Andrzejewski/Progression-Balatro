@@ -1,8 +1,10 @@
 --- Progression Mod
 --- A roguelite deck for Balatro. Each win lets you keep things for all future runs,
---- but every run makes the blinds scale faster. Two carry-over modes:
+--- but every run makes the blinds scale faster. Carry-over modes:
 --- Classic (one new keep per win, cycling card / Joker / Voucher / deck effect,
---- one blind level per run) and Full Loadout (one of each per win, four levels per run).
+--- one blind level per run), Full Loadout (one of each per win, four levels per run),
+--- Versus (head-to-head series pacing), and Unlimited (keep as much as you want,
+--- blind levels double each run: 1, 5, 10, 20, 40, ...).
 
 local mod = SMODS.current_mod
 
@@ -68,6 +70,10 @@ end
 
 PROG.REWARD_CYCLE = { 'card', 'joker', 'voucher', 'deck' }
 PROG.REWARD_NAMES = { card = 'playing card', joker = 'Joker', voucher = 'Voucher', deck = 'deck effect' }
+
+-- Slot count that means "no limit". Big enough that no real run can reach it,
+-- small enough that arithmetic and %d formatting stay exact.
+PROG.UNLIMITED = 1e9
 
 ----------------------------------------------------------------
 -- Carry-over modes
@@ -138,8 +144,20 @@ PROG.MODES = {
 		gain = function() return 'one of each' end,
 		deck_pool = function(run) return PROG.versus_deck_pool(run) end,
 	},
+	unlimited = {
+		label = 'Unlimited',
+		blurb = 'Keep as many cards, Jokers, Vouchers, and deck effects as you want each win. Blind levels double: 1, 5, 10, 20, 40.',
+		slots = function()
+			return { card = PROG.UNLIMITED, joker = PROG.UNLIMITED, voucher = PROG.UNLIMITED, deck = PROG.UNLIMITED }
+		end,
+		level = function(run)
+			if run <= 1 then return 1 end
+			return 5 * 2 ^ (run - 2)
+		end,
+		gain = function() return 'as many of each as you want' end,
+	},
 }
-PROG.MODE_ORDER = { 'classic', 'full', 'versus' }
+PROG.MODE_ORDER = { 'classic', 'full', 'versus', 'unlimited' }
 
 -- The saved mode setting (what the next run will use).
 function PROG.mode()
@@ -495,6 +513,7 @@ local back_obj = SMODS.Back({
 			'Classic mode: {C:attention}one{} new keep per win (cycling),',
 			'blinds scale {C:red}one level{} per run.',
 			'Versus mode: one of each per win, blind levels {C:red}double{} each run.',
+			'Unlimited mode: keep {C:attention}as much as you want{}, blind levels {C:red}double{}.',
 			'Level {C:attention}6{}+: each level adds a {C:red}skipped blind step{} to antes {C:attention}4+{}.',
 		},
 	},
@@ -945,9 +964,19 @@ function PROG.reward_step_def(cat)
 
 	local rows = {}
 	rows[#rows + 1] = T('Run ' .. tostring(G.GAME.prog_run or PROG.state().run) .. ' complete', 0.55, G.C.GREEN)
-	rows[#rows + 1] = T('Keep up to ' .. lim .. ' ' .. PROG.CAT_PLURAL[cat] .. '   (' .. seln .. '/' .. lim .. ' chosen)', 0.4, G.C.WHITE)
+	if lim >= PROG.UNLIMITED then
+		rows[#rows + 1] = T('Keep as many ' .. PROG.CAT_PLURAL[cat] .. ' as you want   (' .. seln .. ' chosen)', 0.4, G.C.WHITE)
+	else
+		rows[#rows + 1] = T('Keep up to ' .. lim .. ' ' .. PROG.CAT_PLURAL[cat] .. '   (' .. seln .. '/' .. lim .. ' chosen)', 0.4, G.C.WHITE)
+	end
 	if #opts == 0 then
 		rows[#rows + 1] = T('None available this run.', 0.35, G.C.UI.TEXT_INACTIVE)
+	end
+	if #opts > 1 then
+		rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.03 }, nodes = {
+			UIBox_button({ button = 'prog_select_all', label = { 'Keep all' }, minw = 1.7, minh = 0.4, scale = 0.28, colour = G.C.GREEN, col = true }),
+			UIBox_button({ button = 'prog_select_none', label = { 'Keep none' }, minw = 1.7, minh = 0.4, scale = 0.28, colour = G.C.RED, col = true }),
+		} }
 	end
 	for i = start_i + 1, math.min(start_i + PAGE_SIZE, #opts) do
 		local o = opts[i]
@@ -989,6 +1018,30 @@ G.FUNCS.prog_toggle = function(e)
 		play_sound('cancel')
 		return
 	end
+	G.FUNCS.overlay_menu({ definition = PROG.reward_step_def(cat), config = { no_esc = true } })
+end
+
+-- Select every option in the current category, up to the mode's limit.
+G.FUNCS.prog_select_all = function()
+	local cat = PROG.cat_queue[PROG.cat_i]
+	if not cat then return end
+	local sel = PROG.sel[cat]
+	local lim = PROG.counts[cat] or 0
+	local n = sel_count(sel)
+	for i = 1, #(PROG.cat_opts[cat] or {}) do
+		if n >= lim then break end
+		if not sel[i] then
+			sel[i] = true
+			n = n + 1
+		end
+	end
+	G.FUNCS.overlay_menu({ definition = PROG.reward_step_def(cat), config = { no_esc = true } })
+end
+
+G.FUNCS.prog_select_none = function()
+	local cat = PROG.cat_queue[PROG.cat_i]
+	if not cat then return end
+	PROG.sel[cat] = {}
 	G.FUNCS.overlay_menu({ definition = PROG.reward_step_def(cat), config = { no_esc = true } })
 end
 

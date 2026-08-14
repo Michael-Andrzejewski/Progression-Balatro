@@ -62,6 +62,17 @@ A **Mode** control sits on the deck panel (and in the Mods config tab and the mu
 
 The pools are cumulative, so a deck effect you kept earlier can always be re-selected. Heidelberg and Echo come from BalatroMultiplayer and Fabled from All in Jest; if one of those mods is missing, that entry simply doesn't appear.
 
+**Unlimited**: no keep limits at all. Every win lets you carry over as many cards, Jokers, Vouchers, and deck effects as you want (the reward screen gains **Keep all** / **Keep none** buttons to make that fast). The blind levels follow the Versus schedule, with no deck-pool restrictions:
+
+| Run | Blinds scale at | Keeps |
+|-----|-----------------|-------|
+| 1 | Level 1 | unlimited |
+| 2 | Level 5 | unlimited |
+| 3 | Level 10 | unlimited |
+| 4 | Level 20 | unlimited |
+| 5 | Level 40 | unlimited |
+| ... | doubles each run | unlimited |
+
 **Classic**: each win unlocks a single new keep-slot, cycling through the four types, and the blinds scale one level per run.
 
 | Run | Blinds scale at | Cards | Jokers | Vouchers | Deck effects |
@@ -121,7 +132,7 @@ To resume on another machine, install this mod (plus any content mods your run u
 ```
 
 - `run` is the run number you'll start at.
-- `mode` is the carry-over mode: `"full"` (Full Loadout), `"classic"`, or `"versus"`. If it's missing, a JSON with any progress loads as Classic and a fresh one as Full Loadout.
+- `mode` is the carry-over mode: `"full"` (Full Loadout), `"classic"`, `"versus"`, or `"unlimited"`. If it's missing, a JSON with any progress loads as Classic and a fresh one as Full Loadout.
 - `bonus_dollars` (optional) is the comeback bonus, extra starting money each run.
 - `meta_lives` (optional, 1 to 4) is your remaining meta-lives in a Versus series.
 - `rank` and `suit` accept full names (`"King"`, `"Hearts"`) or card keys (`"K"`, `"H"`; 10 is `"T"`).
