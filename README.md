@@ -62,16 +62,16 @@ A **Mode** control sits on the deck panel (and in the Mods config tab and the mu
 
 The pools are cumulative, so a deck effect you kept earlier can always be re-selected. Heidelberg and Echo come from BalatroMultiplayer and Fabled from All in Jest; if one of those mods is missing, that entry simply doesn't appear.
 
-**Unlimited**: no keep limits at all. Every win lets you carry over as many cards, Jokers, Vouchers, and deck effects as you want (the reward screen gains **Keep all** / **Keep none** buttons to make that fast). The blind levels follow the Versus schedule, with no deck-pool restrictions:
+**Unlimited**: no keep limits on cards, Jokers, and Vouchers. Every win lets you carry over as many of those as you want (the reward screen gains **Keep all** / **Keep none** buttons to make that fast). Deck effects cannot be kept in this mode. The blind levels follow the Versus schedule:
 
-| Run | Blinds scale at | Keeps |
-|-----|-----------------|-------|
-| 1 | Level 1 | unlimited |
-| 2 | Level 5 | unlimited |
-| 3 | Level 10 | unlimited |
-| 4 | Level 20 | unlimited |
-| 5 | Level 40 | unlimited |
-| ... | doubles each run | unlimited |
+| Run | Blinds scale at | Cards / Jokers / Vouchers | Deck effects |
+|-----|-----------------|---------------------------|--------------|
+| 1 | Level 1 | unlimited | none |
+| 2 | Level 5 | unlimited | none |
+| 3 | Level 10 | unlimited | none |
+| 4 | Level 20 | unlimited | none |
+| 5 | Level 40 | unlimited | none |
+| ... | doubles each run | unlimited | none |
 
 **Classic**: each win unlocks a single new keep-slot, cycling through the four types, and the blinds scale one level per run.
 

@@ -3,8 +3,9 @@
 --- but every run makes the blinds scale faster. Carry-over modes:
 --- Classic (one new keep per win, cycling card / Joker / Voucher / deck effect,
 --- one blind level per run), Full Loadout (one of each per win, four levels per run),
---- Versus (head-to-head series pacing), and Unlimited (keep as much as you want,
---- blind levels double each run: 1, 5, 10, 20, 40, ...).
+--- Versus (head-to-head series pacing), and Unlimited (keep as many cards, Jokers,
+--- and Vouchers as you want but no deck effects, blind levels double each run:
+--- 1, 5, 10, 20, 40, ...).
 
 local mod = SMODS.current_mod
 
@@ -146,15 +147,15 @@ PROG.MODES = {
 	},
 	unlimited = {
 		label = 'Unlimited',
-		blurb = 'Keep as many cards, Jokers, Vouchers, and deck effects as you want each win. Blind levels double: 1, 5, 10, 20, 40.',
+		blurb = 'Keep as many cards, Jokers, and Vouchers as you want each win. No deck effects. Blind levels double: 1, 5, 10, 20, 40.',
 		slots = function()
-			return { card = PROG.UNLIMITED, joker = PROG.UNLIMITED, voucher = PROG.UNLIMITED, deck = PROG.UNLIMITED }
+			return { card = PROG.UNLIMITED, joker = PROG.UNLIMITED, voucher = PROG.UNLIMITED, deck = 0 }
 		end,
 		level = function(run)
 			if run <= 1 then return 1 end
 			return 5 * 2 ^ (run - 2)
 		end,
-		gain = function() return 'as many of each as you want' end,
+		gain = function() return 'as many cards, Jokers, and Vouchers as you want' end,
 	},
 }
 PROG.MODE_ORDER = { 'classic', 'full', 'versus', 'unlimited' }
@@ -513,7 +514,7 @@ local back_obj = SMODS.Back({
 			'Classic mode: {C:attention}one{} new keep per win (cycling),',
 			'blinds scale {C:red}one level{} per run.',
 			'Versus mode: one of each per win, blind levels {C:red}double{} each run.',
-			'Unlimited mode: keep {C:attention}as much as you want{}, blind levels {C:red}double{}.',
+			'Unlimited mode: keep {C:attention}as much as you want{} (no deck effects), blind levels {C:red}double{}.',
 			'Level {C:attention}6{}+: each level adds a {C:red}skipped blind step{} to antes {C:attention}4+{}.',
 		},
 	},

@@ -3,10 +3,10 @@
 	"name": "Progression",
 	"display_name": "Progression",
 	"author": ["Michael"],
-	"description": "A roguelite deck. Win a run to keep rewards forever: one of each type per win in Full Loadout mode, or one new keep per win in Classic mode. Blinds scale faster every run. Versus mode adds head-to-head series with meta-lives and doubling blind levels. Unlimited mode keeps everything you want with doubling blind levels.",
+	"description": "A roguelite deck. Win a run to keep rewards forever: one of each type per win in Full Loadout mode, or one new keep per win in Classic mode. Blinds scale faster every run. Versus mode adds head-to-head series with meta-lives and doubling blind levels. Unlimited mode keeps as many cards, Jokers, and Vouchers as you want (no deck effects) with doubling blind levels.",
 	"prefix": "prog",
 	"main_file": "main.lua",
-	"version": "0.12.0",
+	"version": "0.12.1",
 	"priority": 0,
 	"badge_colour": "7B4FA8",
 	"dependencies": ["Steamodded (>=1.0.0~BETA-0404a)"]
