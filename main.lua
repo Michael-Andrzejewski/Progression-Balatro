@@ -272,6 +272,9 @@ function PROG.refresh_ui_strings()
 		or string.format('Run %d (level %d)', st.run, level)
 	PROG.ui.next_short = 'Next win: ' .. mode.gain(st.run)
 	PROG.ui.kept_line = string.format('Kept: %dc %dj %dv %dd', #st.cards, #st.jokers, #st.vouchers, #st.decks)
+	if (mode.slots(st.run).deck or 0) == 0 and #st.decks == 0 then
+		PROG.ui.kept_line = string.format('Kept: %d cards, %d Jokers, %d Vouchers', #st.cards, #st.jokers, #st.vouchers)
+	end
 	local ex = st.extra_slots or {}
 	if (ex.card or 0) + (ex.joker or 0) + (ex.voucher or 0) > 0 then
 		PROG.ui.kept_line = PROG.ui.kept_line .. string.format('  Extra slots: +%dc +%dj +%dv', ex.card or 0, ex.joker or 0, ex.voucher or 0)
@@ -282,6 +285,11 @@ function PROG.refresh_ui_strings()
 	end
 	PROG.ui.comeback = 'Comeback start: $' .. (st.bonus_dollars or 0)
 	PROG.ui.lives = 'Meta-lives: ' .. (st.meta_lives or 4) .. '/4'
+	-- Series has no meta-lives, comeback money or deck effects; keep its panel to what matters.
+	if mode.no_meta_lives then
+		PROG.ui.comeback = ''
+		PROG.ui.lives = ''
+	end
 end
 
 ----------------------------------------------------------------
@@ -1568,13 +1576,17 @@ function PROG.lobby_panel_def()
 			{ n = G.UIT.T, config = { text = '   ', scale = 0.3, colour = G.C.CLEAR } },
 			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'kept_line', scale = 0.3, colour = G.C.UI.TEXT_LIGHT } },
 		} },
-		{ n = G.UIT.R, config = { align = 'cm', padding = 0.04 }, nodes = {
+		{ n = G.UIT.R, config = { align = 'cm', padding = 0.04 }, nodes = (PROG.mode().no_meta_lives and {
+			btn('prog_import_clipboard', 'Import', G.C.BLUE),
+			btn('prog_export_clipboard', 'Export', G.C.GREEN),
+			btn('prog_cycle_mode', 'Mode', G.C.PURPLE, 1.1),
+		} or {
 			btn('prog_import_clipboard', 'Import', G.C.BLUE),
 			btn('prog_export_clipboard', 'Export', G.C.GREEN),
 			btn('prog_cycle_mode', 'Mode', G.C.PURPLE, 1.1),
 			btn('prog_cycle_comeback', 'Comeback $', G.C.ORANGE, 1.7),
 			btn('prog_cycle_lives', 'Lives', G.C.RED, 1.0),
-		} },
+		}) },
 		{ n = G.UIT.R, config = { align = 'cm', padding = 0.02 }, nodes = {
 			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'mode_line', scale = 0.26, colour = G.C.UI.TEXT_LIGHT } },
 			{ n = G.UIT.T, config = { text = '   ', scale = 0.26, colour = G.C.CLEAR } },
