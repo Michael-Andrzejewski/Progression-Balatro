@@ -999,7 +999,20 @@ function PROG.category_options(cat)
 				}
 			end
 		end
-		table.sort(opts, function(a, b) return a.label < b.label end)
+		-- Cards with something on them (enhancement, edition, seal, bonuses) first,
+		-- then by rank high to low, then suit, so the ones worth keeping are on page 1.
+		local function special(o)
+			local e = o.entry
+			return (e.enhancement or e.edition or e.seal or e.perma) and 1 or 0
+		end
+		local function rank_id(o) return (o.card.base and o.card.base.id) or 0 end
+		table.sort(opts, function(a, b)
+			local sa, sb = special(a), special(b)
+			if sa ~= sb then return sa > sb end
+			local ra, rb = rank_id(a), rank_id(b)
+			if ra ~= rb then return ra > rb end
+			return a.label < b.label
+		end)
 	elseif cat == 'joker' then
 		for _, card in ipairs((G.jokers and G.jokers.cards) or {}) do
 			if card.ability and card.ability.set == 'Joker' and card.config.center then
@@ -1278,7 +1291,9 @@ function PROG.show_reward_summary()
 		{ n = G.UIT.T, config = { text = 'Loadout saved', scale = 0.5, colour = G.C.GREEN, shadow = true } },
 	} }
 	rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.03 }, nodes = {
-		{ n = G.UIT.T, config = { text = string.format('Keeping %d cards, %d Jokers, %d Vouchers, %d deck effects.', #st.cards, #st.jokers, #st.vouchers, #st.decks), scale = 0.35, colour = G.C.WHITE } },
+		{ n = G.UIT.T, config = { text = (PROG.mode().slots(st.run).deck or 0) > 0
+			and string.format('Keeping %d cards, %d Jokers, %d Vouchers, %d deck effects.', #st.cards, #st.jokers, #st.vouchers, #st.decks)
+			or string.format('Keeping %d cards, %d Jokers, %d Vouchers.', #st.cards, #st.jokers, #st.vouchers), scale = 0.35, colour = G.C.WHITE } },
 	} }
 	rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
 		{ n = G.UIT.T, config = { text = string.format('Run %d is next. Blinds scale at level %d.', st.run, PROG.mode().level(st.run)), scale = 0.35, colour = G.C.WHITE } },
@@ -1337,10 +1352,35 @@ end
 -- Use the Multiplayer mod's own return-to-lobby flow when we replaced its end
 -- screen, so the lobby state stays intact; plain menu otherwise.
 G.FUNCS.prog_return_lobby = function(e)
+	-- The other player already sent the lobby back while we were picking.
+	if PROG.deferred_menu then
+		PROG.deferred_menu = nil
+		return G.FUNCS.go_to_menu(e)
+	end
+	-- The match is over, so skip Multiplayer's "Are you sure?" (its Back button
+	-- would strand you on an empty end screen once this summary is closed).
+	if PROG.in_mp() and MP.ACTIONS and MP.ACTIONS.stop_game then
+		G.FUNCS.exit_overlay_menu()
+		return MP.ACTIONS.stop_game()
+	end
 	if PROG.in_mp() and G.FUNCS.mp_return_to_lobby then
 		return G.FUNCS.mp_return_to_lobby(e)
 	end
 	return G.FUNCS.go_to_menu(e)
+end
+
+-- When one player returns to the lobby, Multiplayer pulls the other one back too
+-- (its stopGame handler calls go_to_menu). If that player is still choosing their
+-- loadout, the picker would vanish and the picks would be lost. So while a match
+-- reward is pending, hold the menu change; the summary's Return button finishes it.
+local go_to_menu_ref = G.FUNCS.go_to_menu
+G.FUNCS.go_to_menu = function(...)
+	if PROG.in_mp() and PROG.reward_pending() and G.GAME and (G.GAME.prog_won or G.GAME.prog_lost_match) then
+		PROG.deferred_menu = true
+		PROG.ui.note = 'Your opponent returned to the lobby. Finish your loadout first.'
+		return
+	end
+	return go_to_menu_ref(...)
 end
 
 ----------------------------------------------------------------
