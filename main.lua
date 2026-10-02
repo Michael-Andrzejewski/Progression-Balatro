@@ -28,7 +28,8 @@ local PAGE_SIZE = 8
 -- }
 
 local function default_state()
-	return { run = 1, mode = 'full', cards = {}, jokers = {}, vouchers = {}, decks = {}, bonus_dollars = 0, meta_lives = 4 }
+	return { run = 1, mode = 'full', cards = {}, jokers = {}, vouchers = {}, decks = {}, bonus_dollars = 0, meta_lives = 4,
+		extra_slots = { card = 0, joker = 0, voucher = 0 } }
 end
 
 -- Saves and JSON from before modes existed have no mode field; they were built
@@ -43,9 +44,43 @@ local function normalize_mode(st)
 	end
 end
 
+-- Seats: two game copies on one PC share the save folder, so one mod config
+-- file would let each player's carry-overs overwrite the other's. A launcher
+-- sets PROGRESSION_SEAT (letters, digits, - and _), and that copy keeps its
+-- state in its own file, progression_state_<seat>.json, instead of the mod config.
+local function read_seat()
+	local ok, raw = pcall(os.getenv, 'PROGRESSION_SEAT')
+	if not ok or type(raw) ~= 'string' then return nil end
+	local seat = raw:gsub('[^%w_%-]', '')
+	if seat == '' then return nil end
+	return seat
+end
+PROG.SEAT = read_seat()
+
+function PROG.seat_file()
+	return PROG.SEAT and ('progression_state_' .. PROG.SEAT .. '.json') or nil
+end
+
+local function get_raw_state()
+	if not PROG.SEAT then return mod.config.state end
+	if PROG.seat_state == nil then
+		PROG.seat_state = false
+		local ok, contents = pcall(love.filesystem.read, PROG.seat_file())
+		if ok and type(contents) == 'string' and contents ~= '' then
+			local dok, data = pcall(JSON.decode, contents)
+			if dok and type(data) == 'table' then PROG.seat_state = data end
+		end
+	end
+	return PROG.seat_state or nil
+end
+
+local function set_raw_state(st)
+	if PROG.SEAT then PROG.seat_state = st else mod.config.state = st end
+end
+
 function PROG.state()
-	mod.config.state = mod.config.state or default_state()
-	local st = mod.config.state
+	if not get_raw_state() then set_raw_state(default_state()) end
+	local st = get_raw_state()
 	st.run = st.run or 1
 	st.cards = st.cards or {}
 	st.jokers = st.jokers or {}
@@ -53,19 +88,30 @@ function PROG.state()
 	st.decks = st.decks or {}
 	st.bonus_dollars = st.bonus_dollars or 0
 	st.meta_lives = st.meta_lives or 4
+	st.extra_slots = type(st.extra_slots) == 'table' and st.extra_slots or {}
+	for _, c in ipairs({ 'card', 'joker', 'voucher' }) do
+		st.extra_slots[c] = tonumber(st.extra_slots[c]) or 0
+	end
 	normalize_mode(st)
 	return st
 end
 
 function PROG.save()
+	if PROG.SEAT then
+		local ok, enc = pcall(JSON.encode, PROG.state())
+		if ok then pcall(love.filesystem.write, PROG.seat_file(), enc) end
+		return
+	end
 	SMODS.save_mod_config(mod)
 end
 
 -- Reset clears progress but keeps the chosen mode: it is a setting, not progress.
 function PROG.reset()
-	local mode = mod.config.state and mod.config.state.mode
-	mod.config.state = default_state()
-	if mode and PROG.MODES[mode] then mod.config.state.mode = mode end
+	local old = get_raw_state()
+	local mode = old and old.mode
+	local st = default_state()
+	if mode and PROG.MODES[mode] then st.mode = mode end
+	set_raw_state(st)
 	PROG.save()
 end
 
@@ -157,8 +203,26 @@ PROG.MODES = {
 		end,
 		gain = function() return 'as many cards, Jokers, and Vouchers as you want' end,
 	},
+	series = {
+		label = 'Series',
+		blurb = 'Head-to-head series on the Void Deck. Every match, both players keep one more card, Joker, and Voucher (no deck effects). The match loser also gets a permanent extra slot of the type the winner picks. Blind levels double: 1, 5, 10, 20, 40.',
+		slots = function(run)
+			return { card = run, joker = run, voucher = run, deck = 0 }
+		end,
+		level = function(run)
+			if run <= 1 then return 1 end
+			return 5 * 2 ^ (run - 2)
+		end,
+		gain = function() return 'one card, Joker, and Voucher' end,
+		-- Runs on this deck instead of the Progression Deck.
+		base_deck = 'b_sonfive_voiddeck',
+		-- The loser's extra keep (winner picks its type), stacking permanently.
+		loser_extra = true,
+		-- No meta-lives or comeback money: the extra keep is the comeback.
+		no_meta_lives = true,
+	},
 }
-PROG.MODE_ORDER = { 'classic', 'full', 'versus', 'unlimited' }
+PROG.MODE_ORDER = { 'classic', 'full', 'versus', 'unlimited', 'series' }
 
 -- The saved mode setting (what the next run will use).
 function PROG.mode()
@@ -179,6 +243,18 @@ function PROG.scaling_level(run)
 	return PROG.active_mode().level(run)
 end
 
+-- Display name for a deck key, safe to call before localization is ready.
+local function center_name_safe(key)
+	local ok, res = pcall(function()
+		local c = G.P_CENTERS and G.P_CENTERS[key]
+		if not c then return key end
+		local n = localize({ type = 'name_text', set = 'Back', key = key })
+		if type(n) == 'string' and n ~= 'ERROR' then return n end
+		return c.name or key
+	end)
+	return ok and res or key
+end
+
 -- Live UI strings (referenced by ref_table text nodes so they update in place)
 PROG.ui = { summary = '', next = '', note = '', run_line = '', next_short = '', kept_line = '', comeback = '', mode_line = '', mode_blurb = '', lives = '' }
 
@@ -196,6 +272,14 @@ function PROG.refresh_ui_strings()
 		or string.format('Run %d (level %d)', st.run, level)
 	PROG.ui.next_short = 'Next win: ' .. mode.gain(st.run)
 	PROG.ui.kept_line = string.format('Kept: %dc %dj %dv %dd', #st.cards, #st.jokers, #st.vouchers, #st.decks)
+	local ex = st.extra_slots or {}
+	if (ex.card or 0) + (ex.joker or 0) + (ex.voucher or 0) > 0 then
+		PROG.ui.kept_line = PROG.ui.kept_line .. string.format('  Extra slots: +%dc +%dj +%dv', ex.card or 0, ex.joker or 0, ex.voucher or 0)
+	end
+	if PROG.SEAT then PROG.ui.kept_line = PROG.ui.kept_line .. '  [seat ' .. PROG.SEAT .. ']' end
+	if mode.base_deck then
+		PROG.ui.mode_line = PROG.ui.mode_line .. ' (on ' .. center_name_safe(mode.base_deck) .. ')'
+	end
 	PROG.ui.comeback = 'Comeback start: $' .. (st.bonus_dollars or 0)
 	PROG.ui.lives = 'Meta-lives: ' .. (st.meta_lives or 4) .. '/4'
 end
@@ -425,6 +509,7 @@ function PROG.export_json()
 		decks = st.decks,
 		bonus_dollars = st.bonus_dollars,
 		meta_lives = st.meta_lives,
+		extra_slots = st.extra_slots,
 	})
 end
 
@@ -437,6 +522,12 @@ function PROG.import_json(str)
 	st.mode = (type(data.mode) == 'string' and PROG.MODES[data.mode]) and data.mode or nil
 	if type(data.bonus_dollars) == 'number' then st.bonus_dollars = math.floor(data.bonus_dollars) end
 	if type(data.meta_lives) == 'number' then st.meta_lives = math.max(1, math.min(4, math.floor(data.meta_lives))) end
+	if type(data.extra_slots) == 'table' then
+		for _, c in ipairs({ 'card', 'joker', 'voucher' }) do
+			local v = tonumber(data.extra_slots[c])
+			if v then st.extra_slots[c] = math.max(0, math.floor(v)) end
+		end
+	end
 	if type(data.cards) == 'table' then
 		for _, c in ipairs(data.cards) do
 			-- Accept a card that has a full save blob, or friendly rank+suit fields.
@@ -485,7 +576,7 @@ function PROG.import_json(str)
 		end
 	end
 	normalize_mode(st)
-	mod.config.state = st
+	set_raw_state(st)
 	PROG.save()
 	PROG.refresh_ui_strings()
 	return true, string.format('Imported: run %d, %dc %dj %dv %dd, %s.',
@@ -496,44 +587,27 @@ end
 -- The deck
 ----------------------------------------------------------------
 
-SMODS.Atlas({ key = 'decks', path = 'prog_decks.png', px = 71, py = 95 })
+-- Everything a Progression run sets up at run start: run/level snapshot, blind
+-- scaling, kept deck effects, cards, Jokers, Vouchers, comeback money. Called by
+-- the Progression Deck's apply, and (with hosted = true) after a mode's base
+-- deck applies itself, so Series mode can run on the Void Deck.
+function PROG.apply_to_back(back, hosted)
+	local st = PROG.state()
+	local run = st.run or 1
+	G.GAME.prog_run = run
+	G.GAME.prog_mode = st.mode
+	G.GAME.prog_level = PROG.scaling_level(run)
+	G.GAME.prog_reward_claimed = false
 
-local back_obj = SMODS.Back({
-	key = 'progression',
-	atlas = 'decks',
-	pos = { x = 0, y = 0 },
-	config = {},
-	unlocked = true,
-	discovered = true,
-	loc_txt = {
-		name = 'Progression Deck',
-		text = {
-			'{C:attention}Win Ante 8{} to keep rewards forever.',
-			'Full Loadout mode: one of {C:attention}each{} type per win,',
-			'blinds scale {C:red}four levels{} per run.',
-			'Classic mode: {C:attention}one{} new keep per win (cycling),',
-			'blinds scale {C:red}one level{} per run.',
-			'Versus mode: one of each per win, blind levels {C:red}double{} each run.',
-			'Unlimited mode: keep {C:attention}as much as you want{} (no deck effects), blind levels {C:red}double{}.',
-			'Level {C:attention}6{}+: each level adds a {C:red}skipped blind step{} to antes {C:attention}4+{}.',
-		},
-	},
-	apply = function(self, back)
-		back = back or G.GAME.selected_back
-		local st = PROG.state()
-		local run = st.run or 1
-		G.GAME.prog_run = run
-		G.GAME.prog_mode = st.mode
-		G.GAME.prog_level = PROG.scaling_level(run)
-		G.GAME.prog_reward_claimed = false
+	-- Blind scaling: level 1 to 3 are the vanilla White/Green/Purple stake tables,
+	-- level 4 and up use the Steamodded extended scaling formula automatically.
+	-- The level comes from the mode: Classic plays run N at level N, Full Loadout
+	-- at level 4(N-1)+1.
+	G.GAME.modifiers.scaling = math.max(G.GAME.modifiers.scaling or 1, G.GAME.prog_level)
 
-		-- Blind scaling: level 1 to 3 are the vanilla White/Green/Purple stake tables,
-		-- level 4 and up use the Steamodded extended scaling formula automatically.
-		-- The level comes from the mode: Classic plays run N at level N, Full Loadout
-		-- at level 4(N-1)+1.
-		G.GAME.modifiers.scaling = math.max(G.GAME.modifiers.scaling or 1, G.GAME.prog_level)
-
-		-- Kept deck effects, merged Cocktail-style
+	-- Kept deck effects, merged Cocktail-style. Only on the Progression Deck itself:
+	-- a hosted base deck (Series mode) keeps its own config and gets no deck effects.
+	if not hosted then
 		G.GAME.prog_decks = {}
 		for _, dk in ipairs(st.decks) do
 			local center = G.P_CENTERS[dk]
@@ -566,82 +640,109 @@ local back_obj = SMODS.Back({
 			G.GAME.starting_params.akyrs_letters_no_uppercase = back.effect.config.akyrs_letters_no_uppercase
 		end
 		back.effect.prog_merged = true
+	end
 
-		-- Kept playing cards. Spawned in a deferred event so G.deck exists and so we
-		-- can restore permanent bonuses (the extra_cards proto path can't carry those).
-		-- Tag each with its stored index so re-picking it at a reward updates it in place.
-		if #st.cards > 0 then
+	-- Kept playing cards. Spawned in a deferred event so G.deck exists and so we
+	-- can restore permanent bonuses (the extra_cards proto path can't carry those).
+	-- Tag each with its stored index so re-picking it at a reward updates it in place.
+	if #st.cards > 0 then
+		G.E_MANAGER:add_event(Event({
+			func = function()
+				if G.deck then
+					for i, c in ipairs(st.cards) do
+						local card = PROG.spawn_kept_card(c)
+						if card and card.ability then card.ability.prog_kept_card = i end
+					end
+					G.GAME.starting_deck_size = #G.playing_cards
+				end
+				return true
+			end,
+		}))
+	end
+
+	-- Kept Jokers. Prefer a full-fidelity restore (stickers, modded editions, ability
+	-- state); fall back to key + edition when there's no save blob or the mod is absent.
+	if #st.jokers > 0 then
+		G.E_MANAGER:add_event(Event({
+			func = function()
+				for k, j in ipairs(st.jokers) do
+					local card = j.save and PROG.load_card_from_save(j.save)
+					if card then
+						card:add_to_deck()
+						G.jokers:emplace(card)
+						card:start_materialize(nil, k ~= 1)
+					elseif j.key and G.P_CENTERS[j.key] then
+						card = add_joker(j.key, nil, k ~= 1)
+						if card and j.edition and G.P_CENTERS[j.edition] then
+							card:set_edition(j.edition, true, true)
+						end
+						-- Pin sell value. sell_cost is always recomputed as floor(cost/2) +
+						-- ability.extra_value, so we bump extra_value by the shortfall (that's
+						-- the same field the game uses to make sell value stick) and recompute.
+						if card and type(j.sell_cost) == 'number' and card.set_cost then
+							card:set_cost() -- fold the edition's cost bump in before measuring
+							local shortfall = j.sell_cost - (card.sell_cost or 0)
+							if shortfall ~= 0 then
+								card.ability.extra_value = (card.ability.extra_value or 0) + shortfall
+								card:set_cost()
+							end
+						end
+					end
+					-- Tag so re-picking this Joker at a reward updates it in place.
+					if card and card.ability then card.ability.prog_kept_joker = k end
+				end
+				return true
+			end,
+		}))
+	end
+
+	-- Kept Vouchers
+	G.GAME.prog_start_vouchers = {}
+	for _, v in ipairs(st.vouchers) do
+		if G.P_CENTERS[v] and not G.GAME.used_vouchers[v] then
+			G.GAME.used_vouchers[v] = true
+			G.GAME.prog_start_vouchers[v] = true
+			G.GAME.starting_voucher_count = (G.GAME.starting_voucher_count or 0) + 1
 			G.E_MANAGER:add_event(Event({
 				func = function()
-					if G.deck then
-						for i, c in ipairs(st.cards) do
-							local card = PROG.spawn_kept_card(c)
-							if card and card.ability then card.ability.prog_kept_card = i end
-						end
-						G.GAME.starting_deck_size = #G.playing_cards
-					end
+					Card.apply_to_run(nil, G.P_CENTERS[v])
 					return true
 				end,
 			}))
 		end
+	end
 
-		-- Kept Jokers. Prefer a full-fidelity restore (stickers, modded editions, ability
-		-- state); fall back to key + edition when there's no save blob or the mod is absent.
-		if #st.jokers > 0 then
-			G.E_MANAGER:add_event(Event({
-				func = function()
-					for k, j in ipairs(st.jokers) do
-						local card = j.save and PROG.load_card_from_save(j.save)
-						if card then
-							card:add_to_deck()
-							G.jokers:emplace(card)
-							card:start_materialize(nil, k ~= 1)
-						elseif j.key and G.P_CENTERS[j.key] then
-							card = add_joker(j.key, nil, k ~= 1)
-							if card and j.edition and G.P_CENTERS[j.edition] then
-								card:set_edition(j.edition, true, true)
-							end
-							-- Pin sell value. sell_cost is always recomputed as floor(cost/2) +
-							-- ability.extra_value, so we bump extra_value by the shortfall (that's
-							-- the same field the game uses to make sell value stick) and recompute.
-							if card and type(j.sell_cost) == 'number' and card.set_cost then
-								card:set_cost() -- fold the edition's cost bump in before measuring
-								local shortfall = j.sell_cost - (card.sell_cost or 0)
-								if shortfall ~= 0 then
-									card.ability.extra_value = (card.ability.extra_value or 0) + shortfall
-									card:set_cost()
-								end
-							end
-						end
-						-- Tag so re-picking this Joker at a reward updates it in place.
-						if card and card.ability then card.ability.prog_kept_joker = k end
-					end
-					return true
-				end,
-			}))
-		end
+	-- Comeback bonus: extra starting dollars (e.g. $25 for the match loser). Set per
+	-- machine via the deck panel or the JSON; applied every run until you turn it off.
+	if (st.bonus_dollars or 0) ~= 0 then
+		G.GAME.starting_params.dollars = (G.GAME.starting_params.dollars or 0) + st.bonus_dollars
+	end
+end
 
-		-- Kept Vouchers
-		G.GAME.prog_start_vouchers = {}
-		for _, v in ipairs(st.vouchers) do
-			if G.P_CENTERS[v] and not G.GAME.used_vouchers[v] then
-				G.GAME.used_vouchers[v] = true
-				G.GAME.prog_start_vouchers[v] = true
-				G.GAME.starting_voucher_count = (G.GAME.starting_voucher_count or 0) + 1
-				G.E_MANAGER:add_event(Event({
-					func = function()
-						Card.apply_to_run(nil, G.P_CENTERS[v])
-						return true
-					end,
-				}))
-			end
-		end
+SMODS.Atlas({ key = 'decks', path = 'prog_decks.png', px = 71, py = 95 })
 
-		-- Comeback bonus: extra starting dollars (e.g. $25 for the match loser). Set per
-		-- machine via the deck panel or the JSON; applied every run until you turn it off.
-		if (st.bonus_dollars or 0) ~= 0 then
-			G.GAME.starting_params.dollars = (G.GAME.starting_params.dollars or 0) + st.bonus_dollars
-		end
+local back_obj = SMODS.Back({
+	key = 'progression',
+	atlas = 'decks',
+	pos = { x = 0, y = 0 },
+	config = {},
+	unlocked = true,
+	discovered = true,
+	loc_txt = {
+		name = 'Progression Deck',
+		text = {
+			'{C:attention}Win Ante 8{} to keep rewards forever.',
+			'Full Loadout mode: one of {C:attention}each{} type per win,',
+			'blinds scale {C:red}four levels{} per run.',
+			'Classic mode: {C:attention}one{} new keep per win (cycling),',
+			'blinds scale {C:red}one level{} per run.',
+			'Versus mode: one of each per win, blind levels {C:red}double{} each run.',
+			'Unlimited mode: keep {C:attention}as much as you want{} (no deck effects), blind levels {C:red}double{}.',
+			'Level {C:attention}6{}+: each level adds a {C:red}skipped blind step{} to antes {C:attention}4+{}.',
+		},
+	},
+	apply = function(self, back)
+		PROG.apply_to_back(back or G.GAME.selected_back, false)
 	end,
 	calculate = function(self, back, context)
 		-- Fan out trigger effects (Anaglyph tags, Plasma balancing) to kept deck effects
@@ -659,6 +760,29 @@ local back_obj = SMODS.Back({
 })
 
 PROG.DECK_KEY = (back_obj and back_obj.key) or 'b_prog_progression'
+
+-- The deck a mode runs on instead of the Progression Deck (Series: the Void
+-- Deck), or nil. Read from the saved mode, since this is asked at run start.
+function PROG.base_deck_key()
+	local key = PROG.mode().base_deck
+	if key and key ~= PROG.DECK_KEY and G.P_CENTERS[key] then return key end
+	return nil
+end
+
+-- When the selected deck is the mode's base deck, let it apply itself first,
+-- then lay the Progression run on top. Guarded so it runs once per run even
+-- if another mod calls apply_to_run again.
+local apply_to_run_ref = Back.apply_to_run
+function Back:apply_to_run(...)
+	local ret = apply_to_run_ref(self, ...)
+	local key = self.effect and self.effect.center and self.effect.center.key
+	local base = PROG.base_deck_key()
+	if base and key == base and G.GAME and not G.GAME.prog_hosted_applied then
+		G.GAME.prog_hosted_applied = true
+		PROG.apply_to_back(self, true)
+	end
+	return ret
+end
 
 function PROG.in_run()
 	if not G.GAME then return false end
@@ -782,7 +906,11 @@ end
 function PROG.on_match_loss()
 	if G.GAME.prog_meta_life_lost then return end
 	G.GAME.prog_meta_life_lost = true
+	G.GAME.prog_lost_match = true
 	local st = PROG.state()
+	-- Series mode has no meta-lives or comeback money; its comeback is the
+	-- loser's extra keep, chosen at the start of the reward picker.
+	if PROG.active_mode().no_meta_lives then return end
 	st.meta_lives = math.max(0, (st.meta_lives or 4) - 1)
 	if st.meta_lives == 0 then
 		st.bonus_dollars = (st.bonus_dollars or 0) + 25
@@ -845,7 +973,16 @@ PROG.CAT_PLURAL = { card = 'cards', joker = 'Jokers', voucher = 'Vouchers', deck
 
 function PROG.slot_counts(run)
 	run = run or (G.GAME and G.GAME.prog_run) or PROG.state().run
-	return PROG.active_mode().slots(run)
+	local mode = PROG.active_mode()
+	local counts = copy_table(mode.slots(run))
+	-- Loser extras stack permanently on top of the mode's slots.
+	if mode.loser_extra then
+		local ex = PROG.state().extra_slots or {}
+		for _, c in ipairs({ 'card', 'joker', 'voucher' }) do
+			counts[c] = (counts[c] or 0) + (ex[c] or 0)
+		end
+	end
+	return counts
 end
 
 -- The selectable items in the current run for one category, with `preselect` set on the
@@ -912,6 +1049,10 @@ end
 PROG.reward_page = 1
 
 function PROG.begin_reward()
+	-- Series loser: first record the extra slot the winner picked for them.
+	if PROG.active_mode().loser_extra and G.GAME.prog_lost_match and not G.GAME.prog_extra_type then
+		return PROG.show_extra_choice()
+	end
 	PROG.counts = PROG.slot_counts()
 	PROG.cat_queue = {}
 	for _, c in ipairs(PROG.CATS) do
@@ -923,6 +1064,40 @@ function PROG.begin_reward()
 	PROG.reward_page = 1
 	PROG.show_reward_step()
 end
+
+-- Series mode: the match loser keeps one extra item. The winner decides its
+-- type (tell each other out loud or in chat); the loser clicks it here. The slot
+-- is permanent and stacks with later losses.
+function PROG.show_extra_choice()
+	local function T(text, scale, colour) return { n = G.UIT.R, config = { align = 'cm', padding = 0.04 }, nodes = {
+		{ n = G.UIT.T, config = { text = text, scale = scale, colour = colour } },
+	} } end
+	local rows = {
+		T('Match lost: you get one extra keep', 0.5, G.C.RED),
+		T('Your opponent (the winner) chooses its type.', 0.35, G.C.WHITE),
+		T('Click the type they picked. This slot is permanent.', 0.35, G.C.WHITE),
+		{ n = G.UIT.R, config = { align = 'cm', padding = 0.1 }, nodes = {
+			UIBox_button({ button = 'prog_extra_joker', label = { 'Joker' }, minw = 2, minh = 0.6, scale = 0.4, colour = G.C.RED, col = true }),
+			UIBox_button({ button = 'prog_extra_voucher', label = { 'Voucher' }, minw = 2, minh = 0.6, scale = 0.4, colour = G.C.SECONDARY_SET.Voucher, col = true }),
+			UIBox_button({ button = 'prog_extra_card', label = { 'Card' }, minw = 2, minh = 0.6, scale = 0.4, colour = G.C.BLUE, col = true }),
+		} },
+	}
+	G.FUNCS.overlay_menu({ definition = create_UIBox_generic_options({ no_back = true, contents = rows }), config = { no_esc = true } })
+end
+
+function PROG.choose_extra(cat)
+	if G.GAME.prog_extra_type then return PROG.begin_reward() end
+	local st = PROG.state()
+	st.extra_slots[cat] = (st.extra_slots[cat] or 0) + 1
+	G.GAME.prog_extra_type = cat
+	PROG.save()
+	PROG.refresh_ui_strings()
+	play_sound('coin1')
+	PROG.begin_reward()
+end
+G.FUNCS.prog_extra_joker = function() PROG.choose_extra('joker') end
+G.FUNCS.prog_extra_voucher = function() PROG.choose_extra('voucher') end
+G.FUNCS.prog_extra_card = function() PROG.choose_extra('card') end
 
 -- Backwards-compatible entry point used by the end-screen hooks.
 function PROG.open_reward_menu()
@@ -1109,7 +1284,15 @@ function PROG.show_reward_summary()
 		{ n = G.UIT.T, config = { text = string.format('Run %d is next. Blinds scale at level %d.', st.run, PROG.mode().level(st.run)), scale = 0.35, colour = G.C.WHITE } },
 	} }
 	if PROG.in_mp() then
-		if G.GAME.prog_series_lost then
+		if PROG.active_mode().loser_extra then
+			local ex = st.extra_slots or {}
+			local line = G.GAME.prog_lost_match
+				and string.format('Extra keep recorded: %s. Your extra slots: +%d cards, +%d Jokers, +%d Vouchers.', PROG.REWARD_NAMES[G.GAME.prog_extra_type] or '?', ex.card or 0, ex.joker or 0, ex.voucher or 0)
+				or 'You won. Tell your opponent which type their extra keep is: Joker, Voucher, or card.'
+			rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
+				{ n = G.UIT.T, config = { text = line, scale = 0.33, colour = G.C.GOLD } },
+			} }
+		elseif G.GAME.prog_series_lost then
 			rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
 				{ n = G.UIT.T, config = { text = string.format('Series lost. Comeback money is now $%d and meta-lives refill to 4.', st.bonus_dollars or 0), scale = 0.33, colour = G.C.RED } },
 			} }
