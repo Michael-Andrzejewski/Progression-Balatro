@@ -854,11 +854,15 @@ end
 
 -- Steamodded picks the first blinds before start_run builds the new Joker,
 -- consumable and Voucher areas, and with object weights on (Pokermon turns them
--- on) that pick scans those areas. On every run after the first in a session the
--- slots still hold removed areas whose card lists are gone, and the scan crashes
--- ("bad argument #1 to 'ipairs'"): every Multiplayer match after the first died
--- on start. A removed area has nothing to score, so leave it out of the list.
-if SMODS and SMODS.get_card_areas then
+-- on) that pick scans every Joker-type area. Multiplayer adds its shared Phantom
+-- area (MP.shared) to that list and never clears it when a run ends, so on every
+-- run after the first in a session the scan hits a removed area whose card list
+-- is gone and crashes ("bad argument #1 to 'ipairs'"): every match after the
+-- first died on start. A removed area has nothing to score, so leave it out.
+-- Installed lazily (main menu, run start) so it wraps Multiplayer's version too.
+function PROG.ensure_area_filter()
+	if PROG.area_filter_hooked or not (SMODS and SMODS.get_card_areas) then return end
+	PROG.area_filter_hooked = true
 	local get_card_areas_ref = SMODS.get_card_areas
 	function SMODS.get_card_areas(_type, ...)
 		local t = get_card_areas_ref(_type, ...)
@@ -879,6 +883,7 @@ local start_run_ref = Game.start_run
 function Game:start_run(args)
 	PROG.reset_armed = nil
 	ensure_blind_curve_hook()
+	PROG.ensure_area_filter()
 	start_run_ref(self, args)
 	if PROG.in_run() then
 		G.GAME.modifiers.scaling = math.max(G.GAME.modifiers.scaling or 1,
@@ -1604,6 +1609,7 @@ local main_menu_ref = Game.main_menu
 function Game:main_menu(...)
 	install_mp_lobby_panel()
 	PROG.install_mp_end_screen_hook()
+	PROG.ensure_area_filter()
 	return main_menu_ref(self, ...)
 end
 
