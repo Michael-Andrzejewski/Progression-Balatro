@@ -852,21 +852,33 @@ local function ensure_blind_curve_hook()
 	end
 end
 
+-- Steamodded picks the first blinds before start_run builds the new Joker,
+-- consumable and Voucher areas, and with object weights on (Pokermon turns them
+-- on) that pick scans those areas. On every run after the first in a session the
+-- slots still hold removed areas whose card lists are gone, and the scan crashes
+-- ("bad argument #1 to 'ipairs'"): every Multiplayer match after the first died
+-- on start. A removed area has nothing to score, so leave it out of the list.
+if SMODS and SMODS.get_card_areas then
+	local get_card_areas_ref = SMODS.get_card_areas
+	function SMODS.get_card_areas(_type, ...)
+		local t = get_card_areas_ref(_type, ...)
+		if (_type == 'jokers' or _type == 'playing_cards') and type(t) == 'table' then
+			local live = {}
+			for i = 1, table.maxn(t) do
+				local area = t[i]
+				if area and (type(area) ~= 'table' or area.cards ~= nil) then live[#live + 1] = area end
+			end
+			return live
+		end
+		return t
+	end
+end
+
 -- Reassert scaling after everything else has applied
 local start_run_ref = Game.start_run
 function Game:start_run(args)
 	PROG.reset_armed = nil
 	ensure_blind_curve_hook()
-	-- Steamodded picks the first blinds before start_run rebuilds the Joker,
-	-- consumable and Voucher areas, and with object weights on (Pokermon turns them
-	-- on) that pick scans those areas. On a second run in one session they are the
-	-- previous run's removed areas, whose card lists are gone, and the scan crashes
-	-- ("bad argument #1 to 'ipairs'"). That hit every Multiplayer match after the
-	-- first. The run rebuilds these areas anyway, so drop the dead ones first.
-	for _, name in ipairs({ 'jokers', 'consumeables', 'vouchers' }) do
-		local area = G[name]
-		if type(area) == 'table' and area.cards == nil then G[name] = nil end
-	end
 	start_run_ref(self, args)
 	if PROG.in_run() then
 		G.GAME.modifiers.scaling = math.max(G.GAME.modifiers.scaling or 1,
