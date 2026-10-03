@@ -92,6 +92,7 @@ function PROG.state()
 	for _, c in ipairs({ 'card', 'joker', 'voucher' }) do
 		st.extra_slots[c] = tonumber(st.extra_slots[c]) or 0
 	end
+	st.level_cap = tonumber(st.level_cap)
 	normalize_mode(st)
 	return st
 end
@@ -238,9 +239,17 @@ function PROG.active_mode()
 	return PROG.mode()
 end
 
+-- Optional per-player cap on the blind level (state.level_cap), so a series
+-- can hold the level steady instead of doubling every match.
+function PROG.cap_level(level)
+	local cap = PROG.state().level_cap
+	if cap and cap > 0 then return math.min(level, cap) end
+	return level
+end
+
 function PROG.scaling_level(run)
 	run = run or (G.GAME and G.GAME.prog_run) or PROG.state().run
-	return PROG.active_mode().level(run)
+	return PROG.cap_level(PROG.active_mode().level(run))
 end
 
 -- Display name for a deck key, safe to call before localization is ready.
@@ -261,7 +270,7 @@ PROG.ui = { summary = '', next = '', note = '', run_line = '', next_short = '', 
 function PROG.refresh_ui_strings()
 	local st = PROG.state()
 	local mode = PROG.mode()
-	local level = mode.level(st.run)
+	local level = PROG.cap_level(mode.level(st.run))
 	PROG.ui.summary = string.format('Run %d, blinds level %d. Kept: %d cards, %d Jokers, %d Vouchers, %d deck effects.',
 		st.run, level, #st.cards, #st.jokers, #st.vouchers, #st.decks)
 	PROG.ui.next = 'Next reward on win: ' .. mode.gain(st.run)
@@ -518,6 +527,7 @@ function PROG.export_json()
 		bonus_dollars = st.bonus_dollars,
 		meta_lives = st.meta_lives,
 		extra_slots = st.extra_slots,
+		level_cap = st.level_cap,
 	})
 end
 
@@ -578,6 +588,7 @@ function PROG.import_json(str)
 			if type(v) == 'string' then st.vouchers[#st.vouchers + 1] = v end
 		end
 	end
+	st.level_cap = tonumber(data.level_cap)
 	if type(data.decks) == 'table' then
 		for _, d in ipairs(data.decks) do
 			if type(d) == 'string' then st.decks[#st.decks + 1] = d end
@@ -1331,7 +1342,7 @@ function PROG.show_reward_summary()
 			or string.format('Keeping %d cards, %d Jokers, %d Vouchers.', #st.cards, #st.jokers, #st.vouchers), scale = 0.35, colour = G.C.WHITE } },
 	} }
 	rows[#rows + 1] = { n = G.UIT.R, config = { align = 'cm', padding = 0.05 }, nodes = {
-		{ n = G.UIT.T, config = { text = string.format('Run %d is next. Blinds scale at level %d.', st.run, PROG.mode().level(st.run)), scale = 0.35, colour = G.C.WHITE } },
+		{ n = G.UIT.T, config = { text = string.format('Run %d is next. Blinds scale at level %d.', st.run, PROG.cap_level(PROG.mode().level(st.run))), scale = 0.35, colour = G.C.WHITE } },
 	} }
 	if PROG.in_mp() then
 		if PROG.active_mode().loser_extra then
