@@ -339,14 +339,15 @@ end
 
 -- Rebuild a card from a full save table using the game's own loader. Returns the Card,
 -- or nil if the needed content (e.g. a mod) isn't installed on this machine.
-function PROG.clear_energy_counts(card)
-	local ab = card.ability
-	if type(ab.extra) == 'table' then
-		ab.extra.energy_count = nil
-		ab.extra.c_energy_count = nil
-	end
-	ab.energy_count = nil
-	ab.c_energy_count = nil
+-- Energy stacking is meta-progression (Pokermon). A kept Joker keeps its energy
+-- counts, so evolution re-applies every carried energy, but its personal energy
+-- limit (extra.e_limit_up, the same field Void Deck Negative energies raise) is
+-- lifted to cover them. Each run it starts with a fresh 3 free energy slots.
+function PROG.refresh_energy_limit(card)
+	local ex = card.ability.extra
+	if type(ex) ~= 'table' then return end
+	local used = (ex.energy_count or 0) + (ex.c_energy_count or 0)
+	if used > 0 then ex.e_limit_up = math.max(ex.e_limit_up or 0, used) end
 end
 
 function PROG.load_card_from_save(saved)
@@ -717,10 +718,8 @@ function PROG.apply_to_back(back, hosted)
 							end
 						end
 					end
-					-- Energy stacking is meta-progression: a kept Joker keeps its energized
-					-- stats but starts each run with its energy counts cleared (Pokermon),
-					-- so it can take a fresh round of energy.
-					if card and card.ability then PROG.clear_energy_counts(card) end
+					-- Fresh energy slots each run, carried energy kept (see refresh_energy_limit).
+					if card and card.ability then PROG.refresh_energy_limit(card) end
 					-- Tag so re-picking this Joker at a reward updates it in place.
 					if card and card.ability then card.ability.prog_kept_joker = k end
 				end
