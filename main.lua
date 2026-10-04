@@ -339,6 +339,16 @@ end
 
 -- Rebuild a card from a full save table using the game's own loader. Returns the Card,
 -- or nil if the needed content (e.g. a mod) isn't installed on this machine.
+function PROG.clear_energy_counts(card)
+	local ab = card.ability
+	if type(ab.extra) == 'table' then
+		ab.extra.energy_count = nil
+		ab.extra.c_energy_count = nil
+	end
+	ab.energy_count = nil
+	ab.c_energy_count = nil
+end
+
 function PROG.load_card_from_save(saved)
 	local sf = saved and saved.save_fields
 	if not (sf and sf.center and G.P_CENTERS[sf.center]) then return nil end
@@ -707,6 +717,10 @@ function PROG.apply_to_back(back, hosted)
 							end
 						end
 					end
+					-- Energy stacking is meta-progression: a kept Joker keeps its energized
+					-- stats but starts each run with its energy counts cleared (Pokermon),
+					-- so it can take a fresh round of energy.
+					if card and card.ability then PROG.clear_energy_counts(card) end
 					-- Tag so re-picking this Joker at a reward updates it in place.
 					if card and card.ability then card.ability.prog_kept_joker = k end
 				end
