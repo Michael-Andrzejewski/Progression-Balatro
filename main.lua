@@ -1604,7 +1604,6 @@ function PROG.lobby_panel_def()
 			btn('prog_import_clipboard', 'Import', G.C.BLUE),
 			btn('prog_export_clipboard', 'Export', G.C.GREEN),
 			btn('prog_cycle_mode', 'Mode', G.C.PURPLE, 1.1),
-			btn('prog_resume_toggle', 'Resume', G.C.ORANGE, 1.3),
 		} or {
 			btn('prog_import_clipboard', 'Import', G.C.BLUE),
 			btn('prog_export_clipboard', 'Export', G.C.GREEN),
@@ -1621,9 +1620,6 @@ function PROG.lobby_panel_def()
 			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'comeback', scale = 0.26, colour = G.C.UI.TEXT_LIGHT } },
 			{ n = G.UIT.T, config = { text = '   ', scale = 0.26, colour = G.C.CLEAR } },
 			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'note', scale = 0.26, colour = G.C.UI.TEXT_LIGHT } },
-		} },
-		{ n = G.UIT.R, config = { align = 'cm', padding = 0.02 }, nodes = {
-			{ n = G.UIT.T, config = { ref_table = PROG.ui, ref_value = 'resume', scale = 0.26, colour = G.C.ORANGE } },
 		} },
 	} }
 end
@@ -1726,6 +1722,3 @@ mod.config_tab = function()
 end
 
 PROG.refresh_ui_strings()
-
--- Resumable Multiplayer matches (snapshots + Resume button).
-assert(SMODS.load_file('resume.lua'))()
